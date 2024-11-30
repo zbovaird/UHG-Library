@@ -12,6 +12,45 @@ UHG can be installed using pip:
 
 This will install the CPU version with basic dependencies.
 
+Baremetal Linux Installation
+-------------------------
+
+For baremetal Linux systems, use the provided installation script:
+
+.. code-block:: bash
+
+   # Basic installation
+   ./install_baremetal.sh
+
+   # With CUDA support
+   ./install_baremetal.sh --cuda
+
+   # With virtual environment
+   ./install_baremetal.sh --venv
+
+   # With custom virtual environment path
+   ./install_baremetal.sh --venv-path /path/to/venv
+
+The script handles:
+- Distribution detection (Debian/Ubuntu, Fedora/RHEL, Arch, openSUSE)
+- System dependency installation
+- CUDA detection and setup
+- Python environment configuration
+- UHG installation
+
+Supported Linux distributions:
+- Debian/Ubuntu
+- Fedora/RHEL
+- Arch Linux
+- openSUSE
+
+Required system dependencies will be installed automatically:
+- Python development files
+- Build tools (gcc, g++, cmake)
+- OpenBLAS
+- Git
+- Additional distribution-specific dependencies
+
 GPU Support
 ----------
 
@@ -139,6 +178,12 @@ Optional Dependencies:
 - Development: pytest, black, isort, flake8, mypy
 - Documentation: sphinx, sphinx-rtd-theme, nbsphinx
 
+System Dependencies (Linux):
+- Python development files (python3-dev)
+- Build tools (gcc, g++, cmake)
+- OpenBLAS
+- Git
+
 Environment Support
 -----------------
 
@@ -151,6 +196,7 @@ UHG supports installation in various environments:
 - Docker containers
 - Splunk environments
 - Jupyter environments
+- Baremetal Linux systems
 
 Troubleshooting
 --------------
@@ -186,6 +232,42 @@ If you encounter issues with Splunk installation:
    .. code-block:: bash
 
       $SPLUNK_HOME/bin/python -m pip install uhg[cpu]
+
+Linux System Issues
+^^^^^^^^^^^^^^^^^
+If you encounter issues on Linux:
+
+1. Missing system dependencies:
+
+   .. code-block:: bash
+
+      # Debian/Ubuntu
+      sudo apt-get install python3-dev build-essential cmake libopenblas-dev
+
+      # Fedora/RHEL
+      sudo dnf install python3-devel gcc gcc-c++ cmake openblas-devel
+
+      # Arch Linux
+      sudo pacman -S python base-devel cmake openblas
+
+      # openSUSE
+      sudo zypper install python3-devel gcc gcc-c++ cmake openblas-devel
+
+2. Permission issues:
+
+   .. code-block:: bash
+
+      # Use virtual environment instead of system Python
+      ./install_baremetal.sh --venv
+
+3. CUDA detection:
+
+   .. code-block:: bash
+
+      # Check CUDA availability
+      nvidia-smi
+      # If available, install with CUDA support
+      ./install_baremetal.sh --cuda
 
 Build Issues
 ^^^^^^^^^^^
