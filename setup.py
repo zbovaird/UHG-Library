@@ -1,15 +1,31 @@
 from setuptools import setup, find_packages
 
+# Read version from __init__.py
+with open('UHG/__init__.py', 'r') as f:
+    for line in f:
+        if line.startswith('__version__'):
+            version = line.split('=')[1].strip().strip('"').strip("'")
+            break
+
+# Read README.md
+with open('README.md', 'r', encoding='utf-8') as f:
+    long_description = f.read()
+
 setup(
     name="uhg",
-    version="0.1.0",
+    version=version,
     description="Universal Hyperbolic Geometry Library for PyTorch",
-    long_description=open("README.md").read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     author="Zach Bovaird",
     author_email="zach.bovaird@gmail.com",
     url="https://github.com/zachbovaird/UHG-Library",
-    packages=find_packages(),
+    project_urls={
+        "Documentation": "https://uhg.readthedocs.io",
+        "Source": "https://github.com/zachbovaird/UHG-Library",
+        "Bug Tracker": "https://github.com/zachbovaird/UHG-Library/issues",
+    },
+    packages=find_packages(exclude=["tests*", "docs*", "examples*"]),
     install_requires=[
         "torch>=1.7.0",
         "numpy>=1.19.0",
@@ -27,7 +43,23 @@ setup(
             "black>=20.8b1",
             "isort>=5.7.0",
             "flake8>=3.8.0",
-            "mypy>=0.800"
+            "mypy>=0.800",
+            "twine>=3.4.0",
+            "build>=0.7.0"
+        ],
+        "docs": [
+            "sphinx>=4.0.0",
+            "sphinx-rtd-theme>=0.5.0",
+            "nbsphinx>=0.8.0",
+            "jupyter>=1.0.0"
+        ],
+        "gpu": [
+            "torch>=1.7.0+cu110",
+            "torch-geometric>=2.0.0+cu110"
+        ],
+        "cpu": [
+            "torch>=1.7.0+cpu",
+            "torch-geometric>=2.0.0+cpu"
         ]
     },
     python_requires=">=3.7",
@@ -41,7 +73,14 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Topic :: Scientific/Engineering :: Mathematics",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
-        "Operating System :: OS Independent"
+        "Operating System :: OS Independent",
+        "Framework :: Jupyter",
+        "Framework :: Pytest",
+        "Intended Audience :: Science/Research",
+        "Natural Language :: English",
+        "Operating System :: MacOS",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux"
     ],
     keywords=[
         "hyperbolic geometry",
@@ -49,6 +88,17 @@ setup(
         "deep learning",
         "graph neural networks",
         "pytorch",
-        "machine learning"
-    ]
+        "machine learning",
+        "neural networks",
+        "geometric deep learning",
+        "manifold learning"
+    ],
+    include_package_data=True,
+    zip_safe=False,
+    platforms=["any"],
+    entry_points={
+        "console_scripts": [
+            "uhg=UHG.cli:main",
+        ],
+    }
 ) 
