@@ -86,9 +86,7 @@ optimizer = uhg.optim.HyperbolicAdam(
 - Docker containers
 - Splunk environments
 
-## Documentation
 
-Full documentation is available at [https://uhg.readthedocs.io/](https://uhg.readthedocs.io/)
 
 ## License
 
