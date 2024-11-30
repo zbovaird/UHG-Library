@@ -1,128 +1,157 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Optional, Union, Tuple
-from .base import HyperbolicLayer
-from ..functional import uhg_quadrance, uhg_weighted_midpoint, uhg_aggregate
-from ...manifolds import Manifold
+from typing import Optional, Tuple, Union
+from ...manifolds.base import Manifold
+from ..message import HyperbolicMessagePassing
+from ..attention import HyperbolicAttention
+from ...utils.cross_ratio import compute_cross_ratio, preserve_cross_ratio
 
-class UHGGraphSAGEConv(HyperbolicLayer):
+class HyperbolicGraphConv(nn.Module):
+    """Hyperbolic Graph Convolution Layer using UHG principles.
+    
+    This layer performs graph convolution operations directly in hyperbolic space
+    using projective geometric calculations without tangent space mappings.
+    
+    Args:
+        manifold (Manifold): The hyperbolic manifold to operate on
+        in_features (int): Number of input features
+        out_features (int): Number of output features
+        use_attention (bool): Whether to use hyperbolic attention
+        heads (int): Number of attention heads if using attention
+        concat (bool): Whether to concatenate attention heads
+        dropout (float): Dropout probability
+        bias (bool): Whether to include bias
     """
-    Universal Hyperbolic Geometry GraphSAGE Convolution Layer.
-    
-    This layer implements GraphSAGE convolution operations directly in UHG space
-    using projective geometry, without any tangent space mappings. All operations
-    preserve the hyperbolic structure through direct UHG computations.
-    
-    References:
-        - Chapter 9.1: Graph Operations in UHG
-        - Chapter 9.2: Direct Message Passing
-        - Chapter 9.3: Neighborhood Aggregation
-    """
-    
     def __init__(
         self,
         manifold: Manifold,
         in_features: int,
         out_features: int,
-        use_bias: bool = True,
+        use_attention: bool = True,
+        heads: int = 1,
+        concat: bool = True,
         dropout: float = 0.0,
+        bias: bool = True,
+        **kwargs
     ):
-        """
-        Initialize the UHG GraphSAGE layer.
-        
-        Args:
-            manifold: The hyperbolic manifold to operate on
-            in_features: Number of input features
-            out_features: Number of output features
-            use_bias: Whether to use bias
-            dropout: Dropout probability
-        """
-        super().__init__(manifold)
+        super().__init__()
+        self.manifold = manifold
         self.in_features = in_features
         self.out_features = out_features
-        self.dropout = dropout
+        self.use_attention = use_attention
         
-        # Initialize weights in UHG space
-        self.weight_self = nn.Parameter(torch.Tensor(in_features, out_features))
-        self.weight_neigh = nn.Parameter(torch.Tensor(in_features, out_features))
+        # Initialize message passing module
+        self.message_passing = HyperbolicMessagePassing(
+            manifold=manifold,
+            aggr='mean',
+            flow='source_to_target'
+        )
         
-        if use_bias:
+        # Initialize attention if used
+        if use_attention:
+            self.attention = HyperbolicAttention(
+                manifold=manifold,
+                in_features=in_features,
+                out_features=out_features,
+                heads=heads,
+                concat=concat,
+                dropout=dropout,
+                bias=bias
+            )
+            
+        # Initialize weight matrix in hyperbolic space
+        self.weight = nn.Parameter(torch.Tensor(in_features, out_features))
+        if bias:
             self.bias = nn.Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
             
         self.reset_parameters()
-    
+        
     def reset_parameters(self):
-        """
-        Reset layer parameters using UHG-aware initialization.
-        """
-        nn.init.xavier_uniform_(self.weight_self)
-        nn.init.xavier_uniform_(self.weight_neigh)
+        """Initialize parameters in hyperbolic space."""
+        bound = 1 / self.in_features ** 0.5
+        self.weight.data.uniform_(-bound, bound)
         if self.bias is not None:
-            nn.init.zeros_(self.bias)
-    
+            self.bias.data.uniform_(-bound, bound)
+            
+    def hyperbolic_transform(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply weight transformation in hyperbolic space.
+        
+        Args:
+            x: Input features
+            
+        Returns:
+            Transformed features
+        """
+        # Project weight matrix to hyperbolic space
+        weight = self.manifold.expmap0(self.weight)
+        
+        # Transform using hyperbolic matrix multiplication
+        out = self.manifold.mobius_matvec(weight, x)
+        
+        if self.bias is not None:
+            bias = self.manifold.expmap0(self.bias)
+            out = self.manifold.mobius_add(out, bias)
+            
+        return out
+        
+    def hyperbolic_aggregate(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        size: Optional[Tuple[int, int]] = None
+    ) -> torch.Tensor:
+        """Aggregate neighborhood features in hyperbolic space.
+        
+        Args:
+            x: Node features
+            edge_index: Graph connectivity
+            size: Optional output size
+            
+        Returns:
+            Aggregated features
+        """
+        if self.use_attention:
+            # Use attention-based aggregation
+            return self.attention(x, edge_index, size)
+        else:
+            # Use standard message passing
+            return self.message_passing.propagate(
+                edge_index=edge_index,
+                x=x,
+                size=size
+            )
+            
     def forward(
         self,
         x: torch.Tensor,
         edge_index: torch.Tensor,
-        edge_weight: Optional[torch.Tensor] = None,
+        size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
-        """
-        Forward pass of UHG GraphSAGE convolution.
-        
-        Implements the forward pass directly in UHG space:
-        1. Transform node features using UHG operations
-        2. Aggregate neighbors using UHG weighted midpoint
-        3. Combine self and neighbor features in UHG space
+        """Forward pass of hyperbolic graph convolution.
         
         Args:
-            x: Node feature matrix [num_nodes, in_features]
-            edge_index: Graph connectivity [2, num_edges]
-            edge_weight: Optional edge weights [num_edges]
+            x: Input node features
+            edge_index: Graph connectivity
+            size: Optional output size
             
         Returns:
-            Updated node features [num_nodes, out_features]
+            Convoluted node features
         """
-        self.check_input(x)
+        # Transform node features
+        x = self.hyperbolic_transform(x)
         
-        # Get source and target nodes
-        row, col = edge_index
+        # Aggregate neighborhood information
+        out = self.hyperbolic_aggregate(x, edge_index, size)
         
-        # Apply dropout in UHG space
-        if self.training and self.dropout > 0:
-            mask = torch.bernoulli(torch.full_like(x, 1 - self.dropout))
-            x = x * mask
-            x = self.manifold.proj_manifold(x)
+        # Ensure output satisfies hyperbolic constraints
+        out = self.manifold.normalize(out)
         
-        # Transform self features
-        self_transformed = self.uhg_transform(x, self.weight_self)
+        return out
         
-        # Transform and aggregate neighbor features
-        neigh_transformed = self.uhg_transform(x[col], self.weight_neigh)
-        
-        # Compute weights for neighbor aggregation
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=x.device)
-            
-        # Aggregate neighbors using UHG weighted midpoint
-        out = torch.zeros_like(self_transformed)
-        for i in range(x.size(0)):
-            mask = row == i
-            if mask.any():
-                neighbors = neigh_transformed[mask]
-                weights = edge_weight[mask]
-                out[i] = uhg_weighted_midpoint(neighbors.unsqueeze(0), 
-                                             weights.unsqueeze(0)).squeeze(0)
-        
-        # Combine self and neighbor features in UHG space
-        out = self.uhg_combine(self_transformed, out)
-        
-        # Add bias if present
-        if self.bias is not None:
-            bias = torch.cat([self.bias, torch.ones(1, device=self.bias.device)], dim=0)
-            out = self.uhg_combine(out, bias.expand_as(out))
-        
-        self.check_output(out)
-        return out 
+    def extra_repr(self) -> str:
+        """String representation of layer."""
+        return (f'in_features={self.in_features}, '
+                f'out_features={self.out_features}, '
+                f'use_attention={self.use_attention}')

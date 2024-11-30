@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  uhg:
+    build: .
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  docs:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app/docs
+    command: sphinx-autobuild . _build/html --host 0.0.0.0
+    ports:
+      - "8000:8000"
+
+  jupyter:
+    build: .
+    volumes:
+      - .:/app
+    ports:
+      - "8888:8888"
+    command: jupyter lab --ip=0.0.0.0 --allow-root --NotebookApp.token='' 
