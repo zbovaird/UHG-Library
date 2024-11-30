@@ -1,0 +1,111 @@
+# Universal Hyperbolic Geometry (UHG) Rules
+
+## Mathematical Principles
+1. All implementations must strictly follow the mathematical principles outlined in UHG.pdf
+2. No Euclidean assumptions or approximations unless explicitly required
+3. All geometric operations must preserve hyperbolic invariants
+4. Distance calculations must use hyperbolic metrics only
+5. All transformations must preserve the cross-ratio
+6. NO TANGENT SPACE OPERATIONS - UHG is based on projective geometry
+7. All calculations must be performed directly in hyperbolic space
+8. Use projective geometric operations instead of tangent space mappings
+
+## Hyperbolic Graph Neural Network Requirements
+1. All graph operations must preserve hyperbolic structure
+2. Message passing functions must respect hyperbolic geometry
+3. Aggregation functions must be hyperbolic-aware
+4. Node embeddings must lie on the correct manifold
+5. Layer operations must preserve hyperbolic invariants
+6. Support for different hyperbolic attention mechanisms
+7. Include standard HGNN architectures (HGCN, HGAT, etc.)
+8. Provide hyperbolic optimization strategies
+
+## Code Implementation Rules
+1. NO CODE PLACEHOLDERS - All code must be fully implemented
+2. NO TODO comments or partial implementations
+3. Every function must have complete implementation
+4. All edge cases must be handled
+5. All mathematical operations must be numerically stable
+6. Support for batched operations in PyTorch
+7. GPU acceleration support for all operations
+8. Efficient sparse matrix operations for graphs
+
+## Documentation Requirements
+1. All mathematical formulas must reference specific sections in UHG.pdf
+2. All non-obvious geometric operations must include mathematical explanations
+3. Document any numerical considerations or stability issues
+4. Include references to relevant theorems or proofs
+5. Provide tutorials for HGNN implementations
+6. Include examples for different graph learning tasks
+7. Document all hyperparameters and their effects
+8. Provide benchmarking results and comparisons
+
+## Testing Requirements
+1. All geometric operations must be tested for invariant preservation
+2. Include tests for edge cases and numerical stability
+3. Verify consistency with UHG principles
+4. Test all coordinate transformations for accuracy
+5. Benchmark tests for graph operations
+6. Integration tests for HGNN layers
+7. Performance tests for large graphs
+8. GPU vs CPU consistency tests
+
+## Code Structure
+1. Clear separation between different geometric models
+2. Explicit handling of manifold boundaries
+3. Proper error messages for invalid operations
+4. Consistent naming with UHG terminology
+5. Modular HGNN components
+6. Clear layer abstractions
+7. Flexible graph data structures
+8. Efficient message passing implementations
+
+## Performance Guidelines
+1. Optimize critical geometric operations
+2. Use vectorized operations where possible
+3. Handle numerical precision carefully
+4. Include stability checks for floating-point operations
+5. Optimize for large-scale graphs
+6. Efficient memory usage for sparse graphs
+7. GPU-optimized implementations
+8. Batch processing optimization
+
+## Package Distribution Requirements
+1. Follow PyPI packaging standards
+2. Include proper setup.py configuration
+3. Comprehensive requirements.txt
+4. Clear installation instructions
+5. Version compatibility specifications
+6. Proper dependency management
+7. GPU/CPU version handling
+8. Platform-specific considerations
+
+## Version Control
+1. Tag versions with specific UHG implementations
+2. Document any deviations from UHG.pdf
+3. Track compatibility with PyTorch versions
+4. Maintain semantic versioning
+5. Clear changelog maintenance
+6. Backward compatibility guidelines
+7. Migration guides for updates
+8. LTS version support
+
+## Contribution Guidelines
+1. New code must include mathematical proofs of correctness
+2. Changes must preserve existing geometric invariants
+3. Performance optimizations must not sacrifice accuracy
+4. All new features must align with UHG principles
+5. Follow PEP 8 style guidelines
+6. Include documentation updates
+7. Add relevant tests
+8. Provide benchmark results
+
+## Open Source Requirements
+1. MIT License for maximum accessibility
+2. Clear contribution guidelines
+3. Code of conduct
+4. Issue templates
+5. Pull request templates
+6. CI/CD pipeline configuration
+7. Documentation hosting
+8. Community guidelines 
