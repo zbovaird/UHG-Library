@@ -1,12 +1,11 @@
-# Universal Hyperbolic Geometry (UHG) Library
+# Universal Hyperbolic Geometry Library
 
 [![PyPI version](https://badge.fury.io/py/uhg.svg)](https://badge.fury.io/py/uhg)
-[![Documentation Status](https://readthedocs.org/projects/uhg/badge/?version=latest)](https://uhg.readthedocs.io/en/latest/?badge=latest)
 [![License](https://img.shields.io/github/license/zachbovaird/UHG-Library.svg)](https://github.com/zachbovaird/UHG-Library/blob/main/LICENSE)
 [![Build Status](https://github.com/zachbovaird/UHG-Library/workflows/CI/badge.svg)](https://github.com/zachbovaird/UHG-Library/actions)
 [![Code Coverage](https://codecov.io/gh/zachbovaird/UHG-Library/branch/main/graph/badge.svg)](https://codecov.io/gh/zachbovaird/UHG-Library)
 
-A PyTorch library for hyperbolic deep learning using Universal Hyperbolic Geometry principles. All operations are performed directly in hyperbolic space without tangent space mappings.
+A PyTorch library for Universal Hyperbolic Geometry (UHG) and Hyperbolic Graph Neural Networks. All operations are performed directly in hyperbolic space without tangent space mappings.
 
 ## Installation
 
@@ -88,7 +87,7 @@ optimizer = uhg.optim.HyperbolicAdam(
 
 ## Documentation
 
-Full documentation is available at [https://uhg.readthedocs.io/](https://uhg.readthedocs.io/)
+Full documentation is available in the [docs](docs/) directory and in the [GitHub repository](https://github.com/zachbovaird/UHG-Library).
 
 ## License
 

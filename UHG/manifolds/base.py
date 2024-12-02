@@ -1,6 +1,12 @@
 import torch
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, NamedTuple
 from abc import ABC, abstractmethod
+
+class ScalingInfo(NamedTuple):
+    """Information about scaling operations in hyperbolic space."""
+    scale: float
+    factor: float
+    bias: float
 
 class Manifold(ABC):
     """Base class for all manifolds in Universal Hyperbolic Geometry.

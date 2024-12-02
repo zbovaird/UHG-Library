@@ -1,0 +1,43 @@
+site_name: Universal Hyperbolic Geometry Library
+site_description: A PyTorch library for Universal Hyperbolic Geometry and Hyperbolic Graph Neural Networks
+site_author: UHG Library Team
+repo_url: https://github.com/zachbovaird/UHG-Library
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - User Guide:
+    - Getting Started: guide/getting-started.md
+    - Core Concepts: guide/core-concepts.md
+    - Manifolds: guide/manifolds.md
+    - Graph Neural Networks: guide/graph-neural-networks.md
+  - API Reference:
+    - Core: api/core.md
+    - Manifolds: api/manifolds.md
+    - Layers: api/layers.md
+    - Optimizers: api/optimizers.md
+  - Examples:
+    - Basic Usage: examples/basic.md
+    - Graph Learning: examples/graph-learning.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+  - admonition
+  - footnotes
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js 
