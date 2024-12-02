@@ -1,3 +1,6 @@
+from typing import Tuple, Optional, Union, List
+import torch
+
 import torch
 
 def join(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:

@@ -1,11 +1,5 @@
-from .euclidean import Euclidean
-from .base import Manifold
+from .base import Manifold, ScalingInfo
 from .lorentz import LorentzManifold
 from .siegel import SiegelManifold
 
-__all__ = [
-    "Manifold",
-    "Euclidean",
-    "LorentzManifold",
-    "SiegelManifold",
-] 
+__all__ = ["Manifold", "ScalingInfo", "LorentzManifold", "SiegelManifold"]
