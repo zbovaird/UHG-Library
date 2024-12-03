@@ -188,7 +188,7 @@ fi
 echo
 echo "To verify installation, run Python and try:"
 echo "  import uhg"
-echo "  manifold = uhg.LorentzManifold()"
+echo "  uhg_proj = uhg.ProjectiveUHG()"
 echo
 if [ "$USE_CUDA" = true ]; then
     echo "CUDA support is enabled. GPU acceleration is available."

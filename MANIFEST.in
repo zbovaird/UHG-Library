@@ -1,12 +1,21 @@
 include LICENSE
 include README.md
-include .cursorrules
 include requirements.txt
 recursive-include uhg *.py
-recursive-include tests *.py
-recursive-include examples *.py
-recursive-include docs *.rst *.py *.ipynb
 global-exclude *.pdf
 global-exclude *.pyc
 global-exclude __pycache__
 global-exclude .DS_Store
+global-exclude *.sh
+global-exclude *.yml
+global-exclude *.yaml
+global-exclude *.ipynb
+global-exclude *.gz
+global-exclude *.zip
+global-exclude *.tar
+global-exclude *.pth
+global-exclude *.pkl
+global-exclude *.h5
+global-exclude *.hdf5
+global-exclude *.npy
+global-exclude *.npz

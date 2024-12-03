@@ -99,7 +99,7 @@ import uhg
 
 def setup_uhg():
     \"\"\"Initialize UHG in Splunk environment.\"\"\"
-    return uhg.LorentzManifold()  # Default manifold
+    return uhg.ProjectiveUHG()  # Default implementation
 
 if __name__ == "__main__":
     manifold = setup_uhg()

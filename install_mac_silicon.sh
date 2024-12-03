@@ -104,7 +104,7 @@ main() {
     echo
     echo "To verify installation, run Python and try:"
     echo "  import uhg"
-    echo "  manifold = uhg.LorentzManifold()"
+    echo "  uhg_proj = uhg.ProjectiveUHG()"
 }
 
 main "$@" 

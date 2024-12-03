@@ -1,54 +1,46 @@
-# Universal Hyperbolic Geometry Library
+# Universal Hyperbolic Geometry (UHG)
 
-A PyTorch library for Universal Hyperbolic Geometry (UHG) and Hyperbolic Graph Neural Networks.
+A PyTorch library for hyperbolic deep learning using pure UHG principles.
 
-## Overview
+## Features
 
-The UHG Library provides a comprehensive implementation of Universal Hyperbolic Geometry principles for deep learning applications, with a focus on graph neural networks. It offers:
-
-- Pure hyperbolic operations without tangent space approximations
-- Multiple hyperbolic manifolds (Lorentz, Siegel)
-- Hyperbolic graph neural network layers
-- Hyperbolic attention mechanisms
-- Specialized optimizers for hyperbolic space
+- Pure projective geometry implementation
+- No differential geometry or manifold concepts
+- Cross-ratio preservation
+- Projective transformations
+- Graph neural networks
+- Optimizers and samplers
 
 ## Quick Start
 
-Install the package:
-```bash
-pip install uhg
-```
-
-Basic usage:
 ```python
 import torch
 import uhg
 
-# Create a hyperbolic manifold
-manifold = uhg.manifolds.LorentzManifold()
+# Create points in projective space
+x = torch.randn(10, 3)
+y = torch.randn(10, 3)
 
-# Create hyperbolic points
-x = manifold.random_points(10)
-y = manifold.random_points(10)
+# Initialize UHG
+uhg_proj = uhg.ProjectiveUHG()
 
-# Compute hyperbolic distance
-dist = manifold.dist(x, y)
+# Transform points
+x_proj = uhg_proj.transform(x)
+y_proj = uhg_proj.transform(y)
+
+# Compute projective distance
+dist = uhg_proj.proj_dist(x_proj, y_proj)
+
+# Compute cross-ratio
+cr = uhg_proj.cross_ratio(x_proj[0], x_proj[1], x_proj[2], x_proj[3])
 ```
 
-## Features
+## Installation
 
-- **Pure Hyperbolic Operations**: All operations are performed directly in hyperbolic space without tangent space mappings
-- **Multiple Manifolds**: Support for different hyperbolic geometries
-- **Graph Neural Networks**: Specialized layers for graph learning in hyperbolic space
-- **Optimizers**: Riemannian optimization methods
-- **GPU Support**: Full acceleration for all operations
-- **Batched Operations**: Efficient processing of batched data
+```bash
+pip install uhg
+```
 
 ## Documentation
 
-For detailed documentation, please visit:
-
-- [Installation Guide](installation.md)
-- [User Guide](guide/getting-started.md)
-- [API Reference](api/core.md)
-- [Examples](examples/basic.md) 
+For detailed documentation, visit [uhg.readthedocs.io](https://uhg.readthedocs.io). 

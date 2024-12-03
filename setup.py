@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="uhg",
-    version="0.1.2",
+    version="0.1.7",
     packages=find_packages(exclude=['tests*', 'docs*', 'examples*']),
     package_data={
         'uhg': ['*.py'],
