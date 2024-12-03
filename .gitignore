@@ -40,3 +40,12 @@ test_results/
 suggestions.md
 notes/
 *.log
+
+# Implementation files
+uhg_intrusion_detection.py
+implementations/
+
+# Documentation
+docs/_build/
+docs/api/_build/
+*.pdf

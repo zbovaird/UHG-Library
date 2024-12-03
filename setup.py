@@ -3,7 +3,13 @@ from setuptools import setup, find_packages
 setup(
     name="uhg",
     version="0.1.0",
-    packages=find_packages(),
+    packages=find_packages(exclude=['tests*', 'docs*', 'examples*']),
+    package_data={
+        'uhg': ['*.py'],
+    },
+    exclude_package_data={
+        '': ['*.pdf'],
+    },
     install_requires=[
         "torch>=1.7.0",
         "numpy>=1.19.0",
