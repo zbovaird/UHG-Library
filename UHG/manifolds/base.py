@@ -1,212 +1,97 @@
 import torch
-from typing import Union, Tuple, Optional, NamedTuple
+from typing import Union, Tuple, Optional, NamedTuple, Callable, Any
 from abc import ABC, abstractmethod
+import functools
+
+__all__ = ["Manifold", "ScalingInfo"]
 
 class ScalingInfo(NamedTuple):
-    """Information about scaling operations in hyperbolic space."""
+    """Information about scaling operations in projective space."""
     scale: float
     factor: float
     bias: float
 
+def scaling(info: ScalingInfo, method_name: str) -> Callable:
+    """Decorator for scaling operations in projective space.
+    
+    Args:
+        info: Scaling information
+        method_name: Name of the method being decorated
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(self: Any, *args, **kwargs) -> Any:
+            # Apply scaling before operation
+            scaled_args = [arg * info.scale + info.bias if isinstance(arg, torch.Tensor) else arg 
+                         for arg in args]
+            scaled_kwargs = {k: v * info.scale + info.bias if isinstance(v, torch.Tensor) else v 
+                           for k, v in kwargs.items()}
+            
+            # Call original function
+            result = func(self, *scaled_args, **scaled_kwargs)
+            
+            # Apply inverse scaling after operation
+            if isinstance(result, torch.Tensor):
+                result = (result - info.bias) / info.scale
+            
+            return result
+        return wrapper
+    return decorator
+
 class Manifold(ABC):
-    """Base class for all manifolds in Universal Hyperbolic Geometry.
+    """Base class for projective geometry in Universal Hyperbolic Geometry.
     
-    This class defines the interface that all manifolds must implement.
-    Each manifold represents a geometric space with its own metric and operations.
+    This class defines the interface for projective operations.
     All implementations must strictly follow the principles outlined in UHG.pdf,
-    particularly the foundational axioms in Chapter 1 and the metric properties
-    in Chapter 3.
-    
-    References:
-        - Chapter 1: Foundational Principles of UHG
-        - Chapter 3: Metric Properties and Distance Functions
-        - Chapter 4: Transformations and Invariants
+    particularly the projective geometry foundations in Chapter 3 and the
+    cross-ratio invariants in Chapter 4.
     """
     
-    def __init__(self):
-        """Initialize the manifold with numerical stability parameters."""
-        super().__init__()
-        self.eps = 1e-8  # Numerical stability threshold
-        self.max_norm = 1e8  # Maximum allowed norm for numerical stability
-    
     @abstractmethod
-    def dist(self, x: torch.Tensor, y: torch.Tensor, *, keepdim=False) -> torch.Tensor:
-        """Compute the hyperbolic distance between points x and y on the manifold.
-        
-        As per UHG.pdf Chapter 3, all distance calculations must preserve
-        hyperbolic invariants and use proper hyperbolic metrics.
+    def cross_ratio(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
+        """Compute the cross-ratio of four points.
         
         Args:
-            x: Point on the manifold
-            y: Point on the manifold
-            keepdim: Whether to keep the dimension of the output
+            a, b, c, d: Points in projective space
             
         Returns:
-            Hyperbolic distance between x and y
+            Cross-ratio value
         """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def exp_map(self, x: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        """Exponential map at point x with tangent vector v.
+        pass
         
-        Implements the exponential map as defined in UHG.pdf Chapter 4,
-        preserving hyperbolic invariants during the transformation.
+    @abstractmethod
+    def join(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Compute the join of two points.
         
         Args:
-            x: Point on the manifold
-            v: Tangent vector at x
+            a, b: Points to join
             
         Returns:
-            Point on the manifold reached by following v from x
+            Join line in projective coordinates
         """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def log_map(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Logarithmic map at point x for target point y.
+        pass
         
-        Implements the inverse of the exponential map, following
-        UHG.pdf Chapter 4's principles on hyperbolic transformations.
+    @abstractmethod
+    def meet(self, l1: torch.Tensor, l2: torch.Tensor) -> torch.Tensor:
+        """Compute the meet of two lines.
         
         Args:
-            x: Point on the manifold
-            y: Target point on the manifold
+            l1, l2: Lines to intersect
             
         Returns:
-            Tangent vector at x pointing toward y
+            Meet point in projective coordinates
         """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def parallel_transport(self, x: torch.Tensor, y: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        """Parallel transport of tangent vector v from x to y.
+        pass
         
-        Implements parallel transport as defined in UHG.pdf Chapter 5,
-        preserving the hyperbolic inner product during transport.
+    @abstractmethod
+    def transform(self, points: torch.Tensor, matrix: torch.Tensor) -> torch.Tensor:
+        """Apply a projective transformation.
         
         Args:
-            x: Source point on the manifold
-            y: Target point on the manifold
-            v: Tangent vector at x
+            points: Points to transform
+            matrix: Projective transformation matrix
             
         Returns:
-            Transported vector at y
+            Transformed points
         """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def proj_tan(self, x: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        """Project vector v onto the tangent space at point x.
-        
-        Following UHG.pdf Chapter 4's principles on tangent spaces
-        and their relationship to the manifold structure.
-        
-        Args:
-            x: Point on the manifold
-            v: Vector to project
-            
-        Returns:
-            Projected vector in the tangent space at x
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def proj_manifold(self, x: torch.Tensor) -> torch.Tensor:
-        """Project point x onto the manifold.
-        
-        Ensures points satisfy the manifold constraints as per
-        UHG.pdf Chapter 2's geometric constraints.
-        
-        Args:
-            x: Point to project
-            
-        Returns:
-            Projected point on the manifold
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def inner(self, x: torch.Tensor, u: torch.Tensor, v: Optional[torch.Tensor] = None, 
-             *, keepdim=False) -> torch.Tensor:
-        """Compute the hyperbolic inner product of tangent vectors u and v at point x.
-        
-        Implements the hyperbolic inner product as defined in UHG.pdf Chapter 3,
-        ensuring all metric properties are preserved.
-        
-        Args:
-            x: Point on the manifold
-            u: First tangent vector
-            v: Second tangent vector (optional, defaults to u)
-            keepdim: Whether to keep the dimension of the output
-            
-        Returns:
-            Inner product value
-        """
-        raise NotImplementedError
-    
-    def check_point_on_manifold(self, x: torch.Tensor, *, atol=1e-5, rtol=1e-5
-                              ) -> Union[Tuple[bool, Optional[str]], bool]:
-        """Check if point x lies on the manifold.
-        
-        Verifies that points satisfy the geometric constraints
-        defined in UHG.pdf Chapter 2.
-        """
-        if torch.isnan(x).any():
-            return False, "NaN values detected in point coordinates"
-        if torch.isinf(x).any():
-            return False, "Infinite values detected in point coordinates"
-        if x.abs().max() > self.max_norm:
-            return False, f"Point coordinates exceed maximum allowed norm: {self.max_norm}"
-        return self._check_point_on_manifold(x, atol=atol, rtol=rtol)
-    
-    @abstractmethod
-    def _check_point_on_manifold(self, x: torch.Tensor, *, atol=1e-5, rtol=1e-5
-                               ) -> Union[Tuple[bool, Optional[str]], bool]:
-        """Implementation of point checking logic."""
-        raise NotImplementedError
-    
-    def check_vector_on_tangent(self, x: torch.Tensor, u: torch.Tensor, *, atol=1e-5, rtol=1e-5
-                               ) -> Union[Tuple[bool, Optional[str]], bool]:
-        """Check if vector u lies in the tangent space of x.
-        
-        Verifies that vectors satisfy the tangent space constraints
-        defined in UHG.pdf Chapter 4.
-        """
-        if torch.isnan(u).any():
-            return False, "NaN values detected in vector coordinates"
-        if torch.isinf(u).any():
-            return False, "Infinite values detected in vector coordinates"
-        if u.abs().max() > self.max_norm:
-            return False, f"Vector coordinates exceed maximum allowed norm: {self.max_norm}"
-        return self._check_vector_on_tangent(x, u, atol=atol, rtol=rtol)
-    
-    @abstractmethod
-    def _check_vector_on_tangent(self, x: torch.Tensor, u: torch.Tensor, *, atol=1e-5, rtol=1e-5
-                                ) -> Union[Tuple[bool, Optional[str]], bool]:
-        """Implementation of vector checking logic."""
-        raise NotImplementedError
-    
-    def geodesic(self, x: torch.Tensor, y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Compute points on the geodesic between x and y at times t.
-        
-        Implements geodesic curves as defined in UHG.pdf Chapter 3,
-        ensuring they satisfy the hyperbolic axioms and preserve
-        the cross-ratio.
-        
-        Args:
-            x: Starting point on the manifold
-            y: Ending point on the manifold
-            t: Times at which to evaluate the geodesic
-            
-        Returns:
-            Points on the geodesic at times t
-        """
-        # Ensure inputs are valid
-        self.check_point_on_manifold(x)
-        self.check_point_on_manifold(y)
-        if torch.isnan(t).any() or torch.isinf(t).any():
-            raise ValueError("Invalid time parameters for geodesic")
-            
-        v = self.log_map(x, y)
-        return self.exp_map(x, t.view(-1, 1, 1) * v)
+        pass

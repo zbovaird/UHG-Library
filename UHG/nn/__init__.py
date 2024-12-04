@@ -6,23 +6,12 @@ layers and operations, specifically designed for graph neural networks
 in hyperbolic space.
 """
 
-from .layers import *
-from .models import *
-from .functional import *
+from .layers import ProjectiveLayer, ProjectiveAttention, ProjectiveGraphConv
+from .models import ProjectiveGraphSAGE
 
 __all__ = [
-    # Layers
-    'HyperbolicLinear',
-    'HyperbolicGraphConv',
-    'HyperbolicAttention',
-    
-    # Models
-    'HGCN',
-    'HGAT',
-    'HyperbolicGraphSAGE',
-    
-    # Functional
-    'hyperbolic_softmax',
-    'hyperbolic_attention',
-    'hyperbolic_aggregation',
+    'ProjectiveLayer',
+    'ProjectiveAttention',
+    'ProjectiveGraphConv',
+    'ProjectiveGraphSAGE'
 ] 

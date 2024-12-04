@@ -1,37 +1,31 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Union
-from ...manifolds.base import Manifold
-from ...utils.cross_ratio import compute_cross_ratio, preserve_cross_ratio
+from ...projective import ProjectiveUHG
 
-class HyperbolicLayer(nn.Module):
-    """Base class for all hyperbolic neural network layers.
+class ProjectiveLayer(nn.Module):
+    """Base class for neural network layers using projective geometry.
     
-    This class enforces strict adherence to Universal Hyperbolic Geometry principles:
-    1. No tangent space operations
-    2. Direct calculations in hyperbolic space
-    3. Cross-ratio preservation
-    4. Projective geometric operations
+    This class implements layers using pure projective geometry,
+    following UHG principles without any manifold concepts.
     
     Args:
-        manifold (Manifold): The hyperbolic manifold to operate on
-        in_features (int): Number of input features
-        out_features (int): Number of output features
-        bias (bool, optional): Whether to include bias. Defaults to True.
+        in_features: Number of input features
+        out_features: Number of output features
+        bias: Whether to include bias
     """
     def __init__(
         self,
-        manifold: Manifold,
         in_features: int,
         out_features: int,
         bias: bool = True
     ) -> None:
         super().__init__()
-        self.manifold = manifold
+        self.uhg = ProjectiveUHG()
         self.in_features = in_features
         self.out_features = out_features
         
-        # Initialize weights directly in hyperbolic space
+        # Initialize weights as projective transformations
         self.weight = nn.Parameter(
             torch.Tensor(out_features, in_features)
         )
@@ -44,86 +38,57 @@ class HyperbolicLayer(nn.Module):
         self.reset_parameters()
         
     def reset_parameters(self) -> None:
-        """Initialize parameters using Möbius gyrovector space."""
-        # Initialize in hyperbolic space directly - no tangent space
-        bound = 1 / self.in_features ** 0.5
-        self.weight.data.uniform_(-bound, bound)
+        """Initialize parameters as projective transformations."""
+        # Create random projective transformations
+        matrix = self.uhg.get_projective_matrix(self.in_features)
+        self.weight.data.copy_(matrix[:-1])  # Remove last row for linear map
+        
         if self.bias is not None:
+            bound = 1 / self.in_features ** 0.5
             self.bias.data.uniform_(-bound, bound)
             
-    def compute_hyperbolic_activation(
+    def projective_transform(
         self,
         x: torch.Tensor,
         activation: Optional[str] = None
     ) -> torch.Tensor:
-        """Apply activation function directly in hyperbolic space.
+        """Apply projective transformation to input.
         
         Args:
-            x: Input tensor in hyperbolic space
-            activation: Name of activation function
-            
-        Returns:
-            Tensor after hyperbolic activation
-        """
-        if activation is None:
-            return x
-            
-        # All activations performed directly in hyperbolic space
-        if activation == 'relu':
-            return self.manifold.relu(x)
-        elif activation == 'sigmoid':
-            return self.manifold.sigmoid(x) 
-        elif activation == 'tanh':
-            return self.manifold.tanh(x)
-        else:
-            raise ValueError(f"Unsupported activation: {activation}")
-            
-    def mobius_matvec(self, weight: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        """Perform matrix-vector multiplication in hyperbolic space.
-        
-        Uses Möbius gyrovector operations to maintain hyperbolic structure.
-        
-        Args:
-            weight: Weight matrix
             x: Input tensor
+            activation: Optional activation function
             
         Returns:
-            Result of hyperbolic matrix-vector multiplication
+            Transformed tensor
         """
-        # Compute using direct hyperbolic operations
-        return self.manifold.mobius_matvec(weight, x)
+        # Create projective transformation matrix
+        matrix = torch.cat([
+            self.weight,
+            torch.ones(1, self.weight.size(1), device=self.weight.device)
+        ])
         
-    def preserve_cross_ratio(
-        self,
-        x: torch.Tensor,
-        y: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Ensure transformations preserve the cross-ratio.
+        # Apply projective transformation
+        out = self.uhg.transform(x, matrix)
         
-        Args:
-            x: First tensor
-            y: Second tensor
+        if self.bias is not None:
+            out = out + self.bias.unsqueeze(0)
             
-        Returns:
-            Tuple of tensors with preserved cross-ratio
-        """
-        # Compute initial cross-ratio
-        cr_before = compute_cross_ratio(x, y)
-        
-        # Adjust tensors to preserve cross-ratio
-        x_adj, y_adj = preserve_cross_ratio(x, y, cr_before)
-        
-        return x_adj, y_adj
+        # Apply activation if specified
+        if activation == 'relu':
+            out = torch.relu(out)
+        elif activation == 'sigmoid':
+            out = torch.sigmoid(out)
+        elif activation == 'tanh':
+            out = torch.tanh(out)
+            
+        return out
         
     def forward(
         self,
         x: torch.Tensor,
         activation: Optional[str] = None
     ) -> torch.Tensor:
-        """Forward pass of layer.
-        
-        All operations performed directly in hyperbolic space without
-        tangent space mappings.
+        """Forward pass using projective transformations.
         
         Args:
             x: Input tensor
@@ -132,16 +97,7 @@ class HyperbolicLayer(nn.Module):
         Returns:
             Output tensor
         """
-        # Matrix multiplication in hyperbolic space
-        output = self.mobius_matvec(self.weight, x)
-        
-        if self.bias is not None:
-            output = self.manifold.mobius_add(output, self.bias)
-            
-        # Apply activation in hyperbolic space
-        output = self.compute_hyperbolic_activation(output, activation)
-        
-        return output
+        return self.projective_transform(x, activation)
         
     def extra_repr(self) -> str:
         """String representation of layer."""

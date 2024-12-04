@@ -22,6 +22,25 @@ class ProjectiveUHG:
         """Initialize the UHG projective geometry system."""
         pass
         
+    def get_projective_matrix(self, dim: int) -> torch.Tensor:
+        """
+        Get a projective transformation matrix.
+        
+        This creates a random projective transformation that preserves
+        the cross-ratio and hyperbolic structure.
+        
+        Args:
+            dim: Dimension of the projective space
+            
+        Returns:
+            (dim+1) x (dim+1) projective transformation matrix
+        """
+        # Create a random matrix with determinant 1
+        matrix = torch.randn(dim+1, dim+1)
+        u, s, v = torch.linalg.svd(matrix)
+        matrix = torch.matmul(u, v)  # Special orthogonal matrix
+        return matrix
+        
     def cross_ratio(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
         """
         Compute the cross-ratio of four points.

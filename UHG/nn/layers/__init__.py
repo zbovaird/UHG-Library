@@ -1,5 +1,9 @@
-from .base import HyperbolicLayer
-from .conv import HyperbolicGraphConv
-from .attention import HyperbolicAttention
+from .base import ProjectiveLayer
+from .attention import ProjectiveAttention
+from .conv import ProjectiveGraphConv
 
-__all__ = ["HyperbolicLayer", "HyperbolicGraphConv", "HyperbolicAttention"]
+__all__ = [
+    'ProjectiveLayer',
+    'ProjectiveAttention',
+    'ProjectiveGraphConv'
+]

@@ -1,18 +1,17 @@
 import torch
 from typing import Optional, Dict, List, Union, Tuple
 from torch_geometric.data import Data
-from .base import HyperbolicDataset
-from ..manifolds.base import Manifold
+from .base import ProjectiveDataset
+from ..projective import ProjectiveUHG
 
-class HyperbolicGraphDataset(HyperbolicDataset):
-    """Dataset class for graphs in hyperbolic space.
+class ProjectiveGraphDataset(ProjectiveDataset):
+    """Dataset class for graphs in projective space.
     
-    Extends HyperbolicDataset to handle graph-structured data
-    using UHG principles, without tangent space mappings.
+    Extends ProjectiveDataset to handle graph-structured data
+    using UHG principles.
     
     Args:
-        manifold: The hyperbolic manifold for the data
-        node_features: Node feature tensors in hyperbolic space
+        node_features: Node feature tensors in projective coordinates
         edge_index: Graph connectivity (COO format)
         edge_attr: Optional edge features
         node_labels: Optional node labels
@@ -20,14 +19,13 @@ class HyperbolicGraphDataset(HyperbolicDataset):
     """
     def __init__(
         self,
-        manifold: Manifold,
         node_features: torch.Tensor,
         edge_index: torch.Tensor,
         edge_attr: Optional[torch.Tensor] = None,
         node_labels: Optional[torch.Tensor] = None,
         graph_labels: Optional[torch.Tensor] = None
     ):
-        super().__init__(manifold, node_features, node_labels)
+        super().__init__(node_features, node_labels)
         self.edge_index = edge_index
         self.edge_attr = edge_attr
         self.graph_labels = graph_labels
@@ -35,7 +33,7 @@ class HyperbolicGraphDataset(HyperbolicDataset):
     def __getitem__(self, idx: int) -> Data:
         """Get a graph from the dataset.
         
-        Returns a PyG Data object with hyperbolic features.
+        Returns a PyG Data object with projective features.
         
         Args:
             idx: Graph index
@@ -55,7 +53,7 @@ class HyperbolicGraphDataset(HyperbolicDataset):
             
         return data
         
-    def to(self, device: torch.device) -> 'HyperbolicGraphDataset':
+    def to(self, device: torch.device) -> 'ProjectiveGraphDataset':
         """Move dataset to device."""
         node_features = self.points.to(device)
         edge_index = self.edge_index.to(device)
@@ -63,8 +61,7 @@ class HyperbolicGraphDataset(HyperbolicDataset):
         node_labels = self.labels.to(device) if self.labels is not None else None
         graph_labels = self.graph_labels.to(device) if self.graph_labels is not None else None
         
-        return HyperbolicGraphDataset(
-            self.manifold,
+        return ProjectiveGraphDataset(
             node_features,
             edge_index,
             edge_attr,
@@ -92,17 +89,37 @@ class HyperbolicGraphDataset(HyperbolicDataset):
         mask = edge_index[0] == node_idx
         return edge_index[1, mask].tolist()
         
-    def compute_edge_distances(self) -> torch.Tensor:
-        """Compute distances along graph edges.
+    def compute_edge_cross_ratios(self) -> torch.Tensor:
+        """Compute cross-ratios along graph edges.
+        
+        For each edge (u,v), computes CR(u,v,i1,i2) where i1,i2
+        are the ideal points on the line through u,v.
         
         Returns:
-            Tensor of edge distances
+            Tensor of edge cross-ratios
         """
         src, dst = self.edge_index
-        return torch.tensor([
-            self.manifold.dist(self.points[s], self.points[d])
-            for s, d in zip(src, dst)
-        ])
+        cross_ratios = []
+        
+        for s, d in zip(src, dst):
+            # Get line through edge endpoints
+            line = self.uhg.join(self.points[s], self.points[d])
+            
+            # Get ideal points using polar
+            polar = self.uhg.absolute_polar(line)
+            i1 = self.uhg.meet(line, polar)
+            i2 = -i1  # Opposite point on absolute
+            
+            # Compute cross-ratio
+            cr = self.uhg.cross_ratio(
+                self.points[s],
+                self.points[d],
+                i1,
+                i2
+            )
+            cross_ratios.append(cr)
+            
+        return torch.tensor(cross_ratios)
         
     def get_subgraph(
         self,
@@ -155,19 +172,17 @@ class HyperbolicGraphDataset(HyperbolicDataset):
     @classmethod
     def from_networkx(
         cls,
-        manifold: Manifold,
         G: 'networkx.Graph',
         node_features: Optional[torch.Tensor] = None
-    ) -> 'HyperbolicGraphDataset':
+    ) -> 'ProjectiveGraphDataset':
         """Create dataset from NetworkX graph.
         
         Args:
-            manifold: Target hyperbolic manifold
             G: NetworkX graph
             node_features: Optional node features
             
         Returns:
-            HyperbolicGraphDataset
+            ProjectiveGraphDataset
         """
         import networkx as nx
         
@@ -179,10 +194,11 @@ class HyperbolicGraphDataset(HyperbolicDataset):
         
         # Create random features if none provided
         if node_features is None:
-            node_features = torch.randn(G.number_of_nodes(), manifold.dim)
-            node_features = manifold.project_from_euclidean(node_features)
+            uhg = ProjectiveUHG()
+            matrix = uhg.get_projective_matrix(3)
+            node_features = uhg.transform(torch.eye(3), matrix)[:G.number_of_nodes()]
             
-        return cls(manifold, node_features, edge_index)
+        return cls(node_features, edge_index)
         
     def to_networkx(self) -> 'networkx.Graph':
         """Convert dataset to NetworkX graph.
@@ -209,4 +225,4 @@ class HyperbolicGraphDataset(HyperbolicDataset):
             ]
             
         G.add_edges_from(edges)
-        return G 
+        return G

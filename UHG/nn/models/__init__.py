@@ -1,3 +1,3 @@
-from .sage import HyperbolicGraphSAGE
+from .sage import ProjectiveGraphSAGE
 
-__all__ = ["HyperbolicGraphSAGE"]
+__all__ = ['ProjectiveGraphSAGE']

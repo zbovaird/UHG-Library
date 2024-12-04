@@ -1,30 +1,27 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Union
-from ...manifolds.base import Manifold
-from ..message import HyperbolicMessagePassing
-from ..attention import HyperbolicAttention
-from ...utils.cross_ratio import compute_cross_ratio, preserve_cross_ratio
+from .base import ProjectiveLayer
+from .attention import ProjectiveAttention
+from ...projective import ProjectiveUHG
 
-class HyperbolicGraphConv(nn.Module):
-    """Hyperbolic Graph Convolution Layer using UHG principles.
+class ProjectiveGraphConv(ProjectiveLayer):
+    """Graph convolution layer using projective geometry.
     
-    This layer performs graph convolution operations directly in hyperbolic space
-    using projective geometric calculations without tangent space mappings.
+    This layer performs graph convolution operations using pure projective
+    geometry, following UHG principles without any manifold concepts.
     
     Args:
-        manifold (Manifold): The hyperbolic manifold to operate on
-        in_features (int): Number of input features
-        out_features (int): Number of output features
-        use_attention (bool): Whether to use hyperbolic attention
-        heads (int): Number of attention heads if using attention
-        concat (bool): Whether to concatenate attention heads
-        dropout (float): Dropout probability
-        bias (bool): Whether to include bias
+        in_features: Number of input features
+        out_features: Number of output features
+        use_attention: Whether to use projective attention
+        heads: Number of attention heads if using attention
+        concat: Whether to concatenate attention heads
+        dropout: Dropout probability
+        bias: Whether to use bias
     """
     def __init__(
         self,
-        manifold: Manifold,
         in_features: int,
         out_features: int,
         use_attention: bool = True,
@@ -34,23 +31,12 @@ class HyperbolicGraphConv(nn.Module):
         bias: bool = True,
         **kwargs
     ):
-        super().__init__()
-        self.manifold = manifold
-        self.in_features = in_features
-        self.out_features = out_features
+        super().__init__(in_features, out_features, bias)
         self.use_attention = use_attention
-        
-        # Initialize message passing module
-        self.message_passing = HyperbolicMessagePassing(
-            manifold=manifold,
-            aggr='mean',
-            flow='source_to_target'
-        )
         
         # Initialize attention if used
         if use_attention:
-            self.attention = HyperbolicAttention(
-                manifold=manifold,
+            self.attention = ProjectiveAttention(
                 in_features=in_features,
                 out_features=out_features,
                 heads=heads,
@@ -59,50 +45,13 @@ class HyperbolicGraphConv(nn.Module):
                 bias=bias
             )
             
-        # Initialize weight matrix in hyperbolic space
-        self.weight = nn.Parameter(torch.Tensor(in_features, out_features))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_features))
-        else:
-            self.register_parameter('bias', None)
-            
-        self.reset_parameters()
-        
-    def reset_parameters(self):
-        """Initialize parameters in hyperbolic space."""
-        bound = 1 / self.in_features ** 0.5
-        self.weight.data.uniform_(-bound, bound)
-        if self.bias is not None:
-            self.bias.data.uniform_(-bound, bound)
-            
-    def hyperbolic_transform(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply weight transformation in hyperbolic space.
-        
-        Args:
-            x: Input features
-            
-        Returns:
-            Transformed features
-        """
-        # Project weight matrix to hyperbolic space
-        weight = self.manifold.expmap0(self.weight)
-        
-        # Transform using hyperbolic matrix multiplication
-        out = self.manifold.mobius_matvec(weight, x)
-        
-        if self.bias is not None:
-            bias = self.manifold.expmap0(self.bias)
-            out = self.manifold.mobius_add(out, bias)
-            
-        return out
-        
-    def hyperbolic_aggregate(
+    def aggregate_neighbors(
         self,
         x: torch.Tensor,
         edge_index: torch.Tensor,
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
-        """Aggregate neighborhood features in hyperbolic space.
+        """Aggregate neighborhood features using projective operations.
         
         Args:
             x: Node features
@@ -116,12 +65,27 @@ class HyperbolicGraphConv(nn.Module):
             # Use attention-based aggregation
             return self.attention(x, edge_index, size)
         else:
-            # Use standard message passing
-            return self.message_passing.propagate(
-                edge_index=edge_index,
-                x=x,
-                size=size
-            )
+            # Use mean aggregation with projective operations
+            row, col = edge_index
+            out = torch.zeros_like(x)
+            
+            # Transform and aggregate using projective operations
+            for i in range(len(row)):
+                # Create projective transformation
+                matrix = self.uhg.get_projective_matrix(self.out_features)
+                
+                # Transform neighbor feature
+                neighbor = self.uhg.transform(x[col[i]], matrix)
+                
+                # Add to output
+                out[row[i]] = out[row[i]] + neighbor
+                
+            # Average using projective mean
+            counts = torch.zeros(x.size(0), device=x.device)
+            counts.scatter_add_(0, row, torch.ones_like(row, dtype=torch.float))
+            counts = torch.clamp(counts, min=1)
+            
+            return out / counts.view(-1, 1)
             
     def forward(
         self,
@@ -129,29 +93,20 @@ class HyperbolicGraphConv(nn.Module):
         edge_index: torch.Tensor,
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
-        """Forward pass of hyperbolic graph convolution.
+        """Forward pass of projective graph convolution.
         
         Args:
-            x: Input node features
+            x: Node features
             edge_index: Graph connectivity
             size: Optional output size
             
         Returns:
-            Convoluted node features
+            Convoluted features
         """
         # Transform node features
-        x = self.hyperbolic_transform(x)
+        x = super().forward(x)
         
         # Aggregate neighborhood information
-        out = self.hyperbolic_aggregate(x, edge_index, size)
-        
-        # Ensure output satisfies hyperbolic constraints
-        out = self.manifold.normalize(out)
+        out = self.aggregate_neighbors(x, edge_index, size)
         
         return out
-        
-    def extra_repr(self) -> str:
-        """String representation of layer."""
-        return (f'in_features={self.in_features}, '
-                f'out_features={self.out_features}, '
-                f'use_attention={self.use_attention}')

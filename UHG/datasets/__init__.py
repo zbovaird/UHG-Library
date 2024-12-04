@@ -1,7 +1,7 @@
-from .base import HyperbolicDataset
-from .graph import HyperbolicGraphDataset
+from .base import ProjectiveDataset
+from .graph import ProjectiveGraphDataset
 
 __all__ = [
-    'HyperbolicDataset',
-    'HyperbolicGraphDataset'
+    'ProjectiveDataset',
+    'ProjectiveGraphDataset'
 ]
