@@ -3,6 +3,44 @@ Current Version: 0.1.2
 Last Updated: 2024-03-19
 Status: Active Development
 
+# User Background Information
+1. Strong mathematical background:
+   - Linear algebra and matrix theory
+   - Tensor analysis and operations
+   - Hyperbolic geometry and spaces
+   - Understanding of geometric invariants
+
+2. Learning computer science:
+   - Building understanding of CS concepts
+   - Connecting mathematical theory to implementation
+   - Needs both mathematical and CS explanations
+   - Benefits from seeing parallels between math theory and code
+
+# Communication Guidelines
+1. Use precise mathematical terminology when discussing:
+   - Tensor operations and properties
+   - Geometric transformations
+   - Linear algebraic concepts
+   - Hyperbolic space properties
+
+2. Bridge to computer science by:
+   - Explaining how mathematical concepts are implemented
+   - Showing how tensor operations map to code
+   - Relating geometric invariants to data structures
+   - Demonstrating how theory translates to practice
+
+3. When explaining code:
+   - Start with the mathematical foundation
+   - Show how it's represented in code
+   - Explain implementation choices
+   - Connect back to theoretical properties
+
+4. For algorithms and data structures:
+   - Begin with mathematical abstractions
+   - Show computational representations
+   - Explain efficiency considerations
+   - Relate to geometric intuition
+
 # Universal Hyperbolic Geometry (UHG) Rules
 
 ## Mathematical Principles
