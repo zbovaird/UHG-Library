@@ -2,7 +2,7 @@
 requires = [
     "setuptools>=45",
     "wheel",
-    "setuptools_scm>=6.2",
+    "setuptools_scm[toml]>=6.2",
     "torch>=1.7.0",
     "numpy>=1.19.0"
 ]
@@ -35,12 +35,16 @@ use_parentheses = true
 ensure_newline_before_comments = true
 line_length = 88
 
+[tool.setuptools_scm]
+write_to = "uhg/_version.py"
+write_to_template = '__version__ = "{version}"'
+
 [tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "-ra -q --cov=uhg --cov-report=term-missing"
-testpaths = [
-    "tests",
-]
+addopts = ""
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 
 [tool.mypy]
 python_version = "3.7"
