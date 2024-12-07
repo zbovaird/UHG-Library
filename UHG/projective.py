@@ -47,7 +47,7 @@ class ProjectiveUHG:
         # Compute projective distances using determinants
         def proj_dist(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             n = x.shape[-1]
-            dist = 0.0
+            dist = torch.zeros_like(x[..., 0])
             for i in range(n-1):
                 for j in range(i+1, n):
                     det = x[..., i] * y[..., j] - x[..., j] * y[..., i]
@@ -74,12 +74,12 @@ class ProjectiveUHG:
         """
         # Compute join using exterior product
         n = a.shape[-1]
-        line = torch.zeros(n)
+        line = torch.zeros_like(a)
         for i in range(n-1):
             for j in range(i+1, n):
-                det = a[i] * b[j] - a[j] * b[i]
-                line[i] = line[i] + det
-                line[j] = line[j] - det
+                det = a[..., i] * b[..., j] - a[..., j] * b[..., i]
+                line[..., i] = line[..., i] + det
+                line[..., j] = line[..., j] - det
         return line
         
     def meet(self, l1: torch.Tensor, l2: torch.Tensor) -> torch.Tensor:
@@ -112,7 +112,7 @@ class ProjectiveUHG:
             matrix = self.get_projective_matrix(points.shape[-1] - 1)
             
         # Apply projective transformation
-        transformed = torch.matmul(points, matrix.T)
+        transformed = torch.matmul(points, matrix.transpose(-2, -1))
         
         # Normalize to preserve projective structure
         transformed = transformed / (transformed[..., -1:] + self.eps)
@@ -157,22 +157,22 @@ class ProjectiveUHG:
             Hyperbolic distance
         """
         # Normalize points to projective space
-        p1_norm = p1 / (torch.norm(p1) + self.eps)
-        p2_norm = p2 / (torch.norm(p2) + self.eps)
+        p1_norm = p1 / (torch.norm(p1[..., :-1], dim=-1, keepdim=True) + self.eps)
+        p2_norm = p2 / (torch.norm(p2[..., :-1], dim=-1, keepdim=True) + self.eps)
         
-        # Compute inner product
-        inner = torch.sum(p1_norm * p2_norm)
+        # Get ideal points
+        i1 = torch.zeros_like(p1)
+        i1[..., 0] = 1.0
+        i1[..., -1] = 1.0
         
-        # Compute projective distance using cross-ratio formula
-        # This is numerically more stable than finding ideal points
-        dist = torch.acosh(torch.abs(inner) + self.eps)
+        i2 = torch.zeros_like(p1)
+        i2[..., 1] = 1.0
+        i2[..., -1] = 1.0
         
-        # Handle numerical issues
-        if torch.isnan(dist) or torch.isinf(dist):
-            # Fallback to simpler distance formula for close points
-            diff = p1_norm - p2_norm
-            dist = torch.norm(diff)
-            
+        # Compute distance using cross-ratio
+        cr = self.cross_ratio(p1_norm, p2_norm, i1, i2)
+        dist = torch.abs(torch.log(cr + self.eps))
+        
         return dist
         
     def absolute_polar(self, line: torch.Tensor) -> torch.Tensor:
@@ -189,8 +189,27 @@ class ProjectiveUHG:
             Polar point in projective coordinates
         """
         # Compute polar using quadratic form
-        n = len(line)
         polar = torch.zeros_like(line)
-        polar[:-1] = line[:-1]
-        polar[-1] = -line[-1]
+        polar[..., :-1] = line[..., :-1]
+        polar[..., -1] = -line[..., -1]
         return polar
+        
+    def reflect(self, p: torch.Tensor, l: torch.Tensor) -> torch.Tensor:
+        """
+        Reflect a point in a line using projective geometry.
+        
+        Args:
+            p: Point to reflect
+            l: Line to reflect in
+            
+        Returns:
+            Reflected point in projective coordinates
+        """
+        # Get polar of line
+        polar = self.absolute_polar(l)
+        
+        # Reflect using join and meet
+        join = self.join(p, polar)
+        reflected = self.meet(join, l)
+        
+        return reflected
