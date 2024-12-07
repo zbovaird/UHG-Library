@@ -62,11 +62,15 @@ def test_hyperbolic_properties():
     """Test basic hyperbolic geometric properties."""
     print("\n=== Testing Hyperbolic Properties ===")
     
-    # Create points in the unit disk model
-    theta = torch.linspace(0, 2*np.pi, 100)
-    radius = 0.9  # Points inside unit disk
-    x = radius * torch.cos(theta)
-    y = radius * torch.sin(theta)
+    # Create points in the Klein model
+    # Use smaller radius to avoid boundary issues
+    radius = 0.5  # Points well inside unit disk
+    n_points = 10
+    
+    # Create points along a hyperbolic geodesic (straight line in Klein model)
+    t = torch.linspace(-0.8, 0.8, n_points)
+    x = radius * t
+    y = torch.zeros_like(t)
     points = torch.stack([x, y, torch.ones_like(x)], dim=1)
     
     uhg_proj = uhg.ProjectiveUHG()
@@ -78,7 +82,7 @@ def test_hyperbolic_properties():
     # Compute distances between consecutive points
     distances = []
     for i in range(len(points)-1):
-        dist = uhg_proj.proj_dist(transformed_points[i], transformed_points[i+1])
+        dist = uhg_proj.distance(transformed_points[i], transformed_points[i+1])
         distances.append(dist)
     distances = torch.stack(distances)
     
@@ -87,6 +91,24 @@ def test_hyperbolic_properties():
     
     # Verify distances are positive
     print("All distances positive:", torch.all(distances > 0))
+    assert torch.all(distances > 0), "Found non-positive distances"
+    
+    # Verify triangle inequality for points along geodesic
+    for i in range(len(points)-2):
+        d12 = uhg_proj.distance(transformed_points[i], transformed_points[i+1])
+        d23 = uhg_proj.distance(transformed_points[i+1], transformed_points[i+2])
+        d13 = uhg_proj.distance(transformed_points[i], transformed_points[i+2])
+        
+        # Triangle inequality
+        assert d13 <= d12 + d23 + uhg_proj.eps, "Triangle inequality violated"
+        
+        # Points on geodesic should approximately satisfy additivity
+        # Allow for numerical error and projective distortion
+        rel_error = torch.abs(d13 - (d12 + d23)) / (d13 + uhg_proj.eps)
+        assert rel_error < 0.1, "Points too far from geodesic"
+    
+    print("Triangle inequality satisfied")
+    print("Geodesic property verified")
 
 if __name__ == "__main__":
     print(f"Testing UHG version: {uhg.__version__}\n")

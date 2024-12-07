@@ -21,7 +21,6 @@ class UHGMetricConfig:
     learning_rate: float = 0.001  # Learning rate for optimization
     batch_size: int = 64  # Batch size for training
     eps: float = 1e-9  # Numerical stability
-    use_cross_ratio: bool = True  # Whether to use cross-ratio in metric
 
 class UHGMetricLearner(nn.Module):
     """Learn optimal metrics in UHG space using pure projective operations."""
@@ -32,11 +31,13 @@ class UHGMetricLearner(nn.Module):
         self.config = config
         
         # Initialize projective transformation parameters
-        self.proj_matrix = nn.Parameter(torch.eye(config.embedding_dim + 1))
+        self.proj_matrix = nn.Parameter(
+            torch.eye(config.feature_dim + 1, config.embedding_dim + 1)
+        )
         
-        # Initialize reference points for cross-ratio computation
-        self.ref_points = nn.Parameter(
-            torch.randn(3, config.embedding_dim + 1)
+        # Initialize ideal points for cross-ratio computation
+        self.ideal_points = nn.Parameter(
+            torch.randn(2, config.embedding_dim + 1)
         )
         
         # Initialize optimizer
@@ -45,55 +46,31 @@ class UHGMetricLearner(nn.Module):
             lr=config.learning_rate
         )
         
-    def _normalize_projective(self, x: torch.Tensor) -> torch.Tensor:
-        """Normalize points in projective space."""
-        # Add homogeneous coordinate if needed
-        if x.shape[-1] == self.config.embedding_dim:
-            x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
-            
-        # Normalize last coordinate to 1 (projective normalization)
-        return x / (x[..., -1:] + self.config.eps)
-        
     def _cross_ratio(
         self,
         a: torch.Tensor,
         b: torch.Tensor,
-        c: torch.Tensor,
-        d: torch.Tensor
+        i1: torch.Tensor,
+        i2: torch.Tensor
     ) -> torch.Tensor:
         """Compute cross-ratio in projective space."""
-        # Ensure points are normalized
-        a = self._normalize_projective(a)
-        b = self._normalize_projective(b)
-        c = self._normalize_projective(c)
-        d = self._normalize_projective(d)
+        # Compute projective distances using determinants
+        def proj_dist(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            n = x.shape[-1]
+            dist = 0.0
+            for i in range(n-1):
+                for j in range(i+1, n):
+                    det = x[..., i] * y[..., j] - x[..., j] * y[..., i]
+                    dist = dist + det * det
+            return torch.sqrt(dist + self.config.eps)
         
-        # Compute projective distances
-        ac = torch.sum(a * c, dim=-1)
-        bd = torch.sum(b * d, dim=-1)
-        ad = torch.sum(a * d, dim=-1)
-        bc = torch.sum(b * c, dim=-1)
+        # Compute cross-ratio using projective distances
+        ac = proj_dist(a, i1)
+        bd = proj_dist(b, i2)
+        ad = proj_dist(a, i2)
+        bc = proj_dist(b, i1)
         
-        # Compute cross-ratio
         return (ac * bd) / (ad * bc + self.config.eps)
-        
-    def _projective_distance(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Compute projective distance using cross-ratio with reference points."""
-        # Get normalized reference points
-        r1, r2, r3 = [
-            self._normalize_projective(r) for r in self.ref_points
-        ]
-        
-        # Normalize input points
-        x = self._normalize_projective(x)
-        y = self._normalize_projective(y)
-        
-        # Compute cross-ratio based distance
-        cr = self._cross_ratio(x, y, r1, r2)
-        cr_ref = self._cross_ratio(r1, r2, r2, r3)
-        
-        # Convert to distance (preserving projective invariance)
-        return -torch.log(torch.abs(cr / cr_ref) + self.config.eps)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Transform input features using projective transformation."""
@@ -104,19 +81,23 @@ class UHGMetricLearner(nn.Module):
         # Apply projective transformation
         h = torch.matmul(x, self.proj_matrix)
         
-        # Normalize in projective space
-        h = self._normalize_projective(h)
+        # Normalize to preserve cross-ratio
+        h = h / (h[..., -1:] + self.config.eps)
         
         return h
         
     def compute_distance(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Compute distance between points in learned metric space."""
+        """Compute hyperbolic distance using cross-ratio with ideal points."""
         # Transform points
         x_transformed = self.forward(x)
         y_transformed = self.forward(y)
         
-        # Compute projective distance
-        return self._projective_distance(x_transformed, y_transformed)
+        # Get ideal points
+        i1, i2 = self.ideal_points[0], self.ideal_points[1]
+        
+        # Compute distance using cross-ratio
+        cr = self._cross_ratio(x_transformed, y_transformed, i1, i2)
+        return torch.abs(torch.log(cr + self.config.eps))
         
     def train_step(
         self,
@@ -124,7 +105,7 @@ class UHGMetricLearner(nn.Module):
         positive: torch.Tensor,
         negative: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
-        """Perform single training step using triplet and cross-ratio loss."""
+        """Perform single training step using cross-ratio based loss."""
         # Zero gradients
         self.optimizer.zero_grad()
         
@@ -133,42 +114,40 @@ class UHGMetricLearner(nn.Module):
         positive_t = self.forward(positive)
         negative_t = self.forward(negative)
         
-        # Compute distances
-        pos_dist = self._projective_distance(anchor_t, positive_t)
-        neg_dist = self._projective_distance(anchor_t, negative_t)
+        # Compute distances using cross-ratio
+        pos_dist = self.compute_distance(anchor_t, positive_t)
+        neg_dist = self.compute_distance(anchor_t, negative_t)
         
         # Compute mean distances for scalar loss
         pos_dist_mean = pos_dist.mean()
         neg_dist_mean = neg_dist.mean()
         
         # Compute triplet loss
-        triplet_loss = F.relu(pos_dist_mean - neg_dist_mean + self.config.margin)
+        loss = F.relu(pos_dist_mean - neg_dist_mean + self.config.margin)
         
-        # Add cross-ratio loss if enabled
-        if self.config.use_cross_ratio:
-            cr_anchor = self._cross_ratio(
-                anchor_t,
-                positive_t,
-                negative_t,
-                self.ref_points[0]
+        # Compute cross-ratio preservation loss
+        cr_loss = torch.tensor(0.0, device=anchor.device)
+        for i in range(len(anchor_t)):
+            cr_before = self._cross_ratio(
+                anchor[i], positive[i], 
+                negative[i], self.ideal_points[0]
             )
-            cr_target = torch.ones_like(cr_anchor) * 0.5
-            cr_loss = F.mse_loss(cr_anchor, cr_target)
-            total_loss = triplet_loss + cr_loss
-        else:
-            total_loss = triplet_loss
-            cr_loss = torch.tensor(0.0)
-        
-        # Backward pass and optimization
+            cr_after = self._cross_ratio(
+                anchor_t[i], positive_t[i],
+                negative_t[i], self.ideal_points[0]
+            )
+            cr_loss = cr_loss + F.mse_loss(cr_after, cr_before)
+            
+        total_loss = loss + cr_loss
         total_loss.backward()
         self.optimizer.step()
         
         return {
-            'total_loss': total_loss.item(),
-            'triplet_loss': triplet_loss.item(),
-            'cr_loss': cr_loss.item(),
-            'pos_dist': pos_dist_mean.item(),
-            'neg_dist': neg_dist_mean.item()
+            "loss": total_loss.item(),
+            "triplet_loss": loss.item(),
+            "cr_loss": cr_loss.item(),
+            "pos_dist": pos_dist_mean.item(),
+            "neg_dist": neg_dist_mean.item()
         }
         
     def save_state(self, path: str):
