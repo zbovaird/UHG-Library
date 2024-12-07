@@ -2,33 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [0.1.18] - 2024-03-19
+## [0.2.0] - 2023-12-07
 
 ### Added
-- PEP 561 compliance with py.typed marker
-- Improved type hints throughout codebase
-- UHG feature extraction module with projective geometry operations
-- Better numerical stability in geometric computations
-- Cross-ratio preservation in feature space
+- UHG Metric Learning
+  - Pure projective implementation
+  - Cross-ratio preservation
+  - Geometric pattern matching
+
+- UHG Attention Mechanism
+  - Multi-head attention in projective space
+  - Cross-ratio preserving attention weights
+  - Geometric relationship learning
+
+- Threat Correlation
+  - Indicator correlation using UHG
+  - Cross-type pattern recognition
+  - Network-System-Behavior relationships
+  - Payload analysis integration
 
 ### Changed
-- Switched to setuptools_scm for version management
-- Updated package metadata and dependencies
-- Improved documentation and examples
+- Updated core UHG operations for better numerical stability
+- Improved projective transformation handling
+- Enhanced cross-ratio computation
 
 ### Fixed
-- Version synchronization between setup.py and __init__.py
-- PyPI packaging issues with missing files
-- Numerical stability in cross-ratio computations
+- Shape handling in projective operations
+- Homogeneous coordinate normalization
+- Cross-ratio preservation in transformations
 
-## [0.1.17] - 2024-03-18
+## [0.1.0] - 2023-12-01
 
 ### Added
-- Initial release of UHG library
-- Core projective geometry operations
-- Basic hyperbolic neural network layers
-- Graph neural network support
-- Documentation and examples 
+- Initial release
+- Core UHG operations
+- Basic feature extraction
+- Anomaly detection 

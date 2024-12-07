@@ -1,27 +1,44 @@
 include LICENSE
 include README.md
 include CHANGELOG.md
+include CYBERSECURITY_BENEFITS.md
 include pyproject.toml
-include uhg/py.typed
-recursive-include uhg *.py *.pyi
+include setup.cfg
+include requirements.txt
+
+# Documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+recursive-include docs *.py
+recursive-include docs *.yml
+
+# Package data
+recursive-include uhg *.py
+recursive-include uhg *.pyi
+recursive-include uhg py.typed
+
+# Examples
+recursive-include examples *.py
+
+# Tests
 recursive-include tests *.py
-recursive-include docs *.md *.rst *.py
-recursive-exclude * __pycache__
-recursive-exclude * *.py[cod]
-global-exclude *.pdf
+
+# Exclude
 global-exclude *.pyc
-global-exclude __pycache__
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude .git
+global-exclude .ipynb_checkpoints
 global-exclude .DS_Store
+global-exclude __pycache__
+global-exclude .coverage
 global-exclude *.sh
-global-exclude *.yml
-global-exclude *.yaml
-global-exclude *.ipynb
-global-exclude *.gz
-global-exclude *.zip
-global-exclude *.tar
-global-exclude *.pth
-global-exclude *.pkl
-global-exclude *.h5
-global-exclude *.hdf5
-global-exclude *.npy
-global-exclude *.npz
+global-exclude Miniconda3-latest-MacOSX-arm64.sh
+global-exclude UHG.pdf
+global-exclude UHG pictorial.pdf
+global-exclude *.log
+global-exclude .pytest_cache
+global-exclude .tox
+global-exclude .venv
+global-exclude build
+global-exclude dist

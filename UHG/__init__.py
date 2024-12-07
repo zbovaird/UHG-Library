@@ -10,6 +10,27 @@ from typing import List
 from .projective import ProjectiveUHG
 from .tensor import UHGTensor, UHGParameter
 from .core import UHGCore
+from .attention import UHGMultiHeadAttention, UHGAttentionConfig
+from .threat_indicators import (
+    ThreatIndicator,
+    ThreatIndicatorType,
+    ThreatCorrelation
+)
 
-__version__: str = "0.1.18"
-__all__: List[str] = ["ProjectiveUHG", "UHGTensor", "UHGParameter", "UHGCore"] 
+__version__: str = "0.2.2"
+__all__: List[str] = [
+    # Core components
+    "ProjectiveUHG",
+    "UHGTensor",
+    "UHGParameter",
+    "UHGCore",
+    
+    # Attention mechanism
+    "UHGMultiHeadAttention",
+    "UHGAttentionConfig",
+    
+    # Threat detection
+    "ThreatIndicator",
+    "ThreatIndicatorType",
+    "ThreatCorrelation"
+] 
