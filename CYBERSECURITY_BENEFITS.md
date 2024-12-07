@@ -368,3 +368,125 @@ scan_patterns = {
 - Attack chain analysis
 - Behavioral profiling
 - Anomaly investigation 
+
+## Cybersecurity Benefits of UHG Library
+
+## Core Benefits
+
+1. Geometric Pattern Recognition
+- Uses projective geometry to identify malicious patterns
+- Cross-ratio preservation ensures pattern recognition despite transformations
+- Robust against common evasion techniques
+
+2. Feature Space Benefits
+- Hyperbolic embeddings capture hierarchical threat relationships
+- Projective transformations preserve pattern structure
+- Efficient representation of complex attack patterns
+
+3. Anomaly Detection
+- Geometric distance metrics for outlier detection
+- Cross-ratio based similarity measures
+- Robust against mimicry attacks
+
+4. Metric Learning
+- Learns optimal threat similarity metrics
+- Adapts to evolving attack patterns
+- Preserves geometric invariants
+
+5. Attention Mechanisms
+- Multi-head attention for pattern analysis
+- Cross-ratio preserving attention weights
+- Geometric relationship learning
+
+## New: Threat Correlation Benefits
+
+1. Indicator Correlation
+- Links different types of threat indicators:
+  - Network indicators (IPs, domains, traffic patterns)
+  - System indicators (files, registry, processes)
+  - Behavioral indicators (API calls, memory operations)
+  - Payload indicators (code patterns, configurations)
+- Preserves relationships under attacker evasion attempts
+- Uses projective geometry for robust pattern matching
+
+2. Cross-Type Pattern Recognition
+- Identifies complex attack chains across indicator types
+- Examples:
+  - Network traffic → System changes → Behavioral patterns
+  - Payload analysis → Network communication → Process behavior
+- Maintains pattern structure despite obfuscation
+
+3. Relationship Analysis
+- Network-System Relationships:
+  - Links network IOCs to system artifacts
+  - Tracks attack progression through system
+  - Resistant to connection masking
+
+- Network-Behavior Relationships:
+  - Maps network patterns to process behavior
+  - Identifies command and control activity
+  - Robust against protocol manipulation
+
+- System-Behavior Relationships:
+  - Correlates system changes with behaviors
+  - Tracks malware execution patterns
+  - Resistant to rootkit techniques
+
+- Payload Relationships:
+  - Links malicious code across contexts
+  - Identifies related attack tools
+  - Robust against code obfuscation
+
+4. Real-World Applications
+
+APT Detection:
+- Correlates diverse indicator types
+- Tracks attack progression
+- Maps campaign patterns
+- Identifies novel techniques
+
+Zero-Day Detection:
+- Groups related novel indicators
+- Maps unknown threats to known patterns
+- Discovers new attack techniques
+- Early warning system
+
+Threat Hunting:
+- Query relationships between indicators
+- Find hidden connections
+- Discover attack patterns
+- Track threat evolution
+
+Incident Response:
+- Group related indicators
+- Track attack spread
+- Identify affected systems
+- Prioritize response actions
+
+Threat Intelligence:
+- Correlate indicators across sources
+- Discover attack campaigns
+- Share indicator relationships
+- Track threat actor TTPs
+
+5. Technical Advantages
+
+Pattern Preservation:
+- Cross-ratio preservation ensures pattern recognition
+- Projective transformations maintain relationships
+- Geometric invariants resist evasion
+
+Scalability:
+- Efficient processing of high-dimensional data
+- Multi-head attention parallelizes analysis
+- Optimized for large-scale deployments
+
+Adaptability:
+- Learns new threat patterns
+- Updates relationship models
+- Evolves with threat landscape
+
+Integration:
+- Supports standard indicator formats
+- Interfaces with existing security tools
+- Real-time processing capability 
