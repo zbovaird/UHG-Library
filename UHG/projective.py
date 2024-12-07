@@ -74,9 +74,18 @@ class ProjectiveUHG:
         Returns:
             Projective distance value
         """
-        # Join operation (wedge product)
-        join = torch.cross(x, y)
-        return torch.norm(join, dim=-1)
+        # Compute determinant-based distance for arbitrary dimensions
+        # This generalizes the cross product to n-dimensions
+        n = len(x)
+        dist = 0.0
+        
+        # Compute sum of all 2x2 determinants
+        for i in range(n-1):
+            for j in range(i+1, n):
+                det = x[i] * y[j] - x[j] * y[i]
+                dist += det * det
+                
+        return torch.sqrt(dist)
     
     def transform(self, points: torch.Tensor, matrix: torch.Tensor) -> torch.Tensor:
         """

@@ -1,7 +1,13 @@
 include LICENSE
 include README.md
-include requirements.txt
-recursive-include uhg *.py
+include CHANGELOG.md
+include pyproject.toml
+include uhg/py.typed
+recursive-include uhg *.py *.pyi
+recursive-include tests *.py
+recursive-include docs *.md *.rst *.py
+recursive-exclude * __pycache__
+recursive-exclude * *.py[cod]
 global-exclude *.pdf
 global-exclude *.pyc
 global-exclude __pycache__
