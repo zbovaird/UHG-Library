@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Optional, Union
-from ..layers import ProjectiveGraphConv, ProjectiveAttention
+from ..layers.sage import ProjectiveSAGEConv
 from ...projective import ProjectiveUHG
 
 class ProjectiveGraphSAGE(nn.Module):
-    """GraphSAGE model using projective geometry.
+    """UHG-compliant GraphSAGE model for graph learning.
     
     This model implements GraphSAGE using pure projective geometry,
     following UHG principles without any manifold concepts.
@@ -17,9 +17,6 @@ class ProjectiveGraphSAGE(nn.Module):
         out_channels: Size of output features
         num_layers: Number of GraphSAGE layers
         dropout: Dropout probability
-        use_attention: Whether to use attention
-        heads: Number of attention heads
-        concat: Whether to concatenate attention heads
         bias: Whether to use bias
     """
     def __init__(
@@ -29,10 +26,7 @@ class ProjectiveGraphSAGE(nn.Module):
         out_channels: int,
         num_layers: int = 2,
         dropout: float = 0.0,
-        use_attention: bool = False,
-        heads: int = 1,
-        concat: bool = True,
-        bias: bool = True,
+        bias: bool = True
     ):
         super().__init__()
         self.uhg = ProjectiveUHG()
@@ -43,72 +37,51 @@ class ProjectiveGraphSAGE(nn.Module):
         self.layers = nn.ModuleList()
         
         # Input layer
-        if use_attention:
-            self.layers.append(
-                ProjectiveAttention(
-                    in_features=in_channels,
-                    out_features=hidden_channels,
-                    heads=heads,
-                    concat=concat,
-                    dropout=dropout,
-                    bias=bias
-                )
+        self.layers.append(
+            ProjectiveSAGEConv(
+                in_features=in_channels,
+                out_features=hidden_channels,
+                bias=bias
             )
-        else:
-            self.layers.append(
-                ProjectiveGraphConv(
-                    in_features=in_channels,
-                    out_features=hidden_channels,
-                    use_attention=False,
-                    bias=bias
-                )
-            )
-            
+        )
+        
         # Hidden layers
         for _ in range(num_layers - 2):
-            if use_attention:
-                self.layers.append(
-                    ProjectiveAttention(
-                        in_features=hidden_channels,
-                        out_features=hidden_channels,
-                        heads=heads,
-                        concat=concat,
-                        dropout=dropout,
-                        bias=bias
-                    )
-                )
-            else:
-                self.layers.append(
-                    ProjectiveGraphConv(
-                        in_features=hidden_channels,
-                        out_features=hidden_channels,
-                        use_attention=False,
-                        bias=bias
-                    )
-                )
-                
-        # Output layer
-        if use_attention:
             self.layers.append(
-                ProjectiveAttention(
+                ProjectiveSAGEConv(
                     in_features=hidden_channels,
-                    out_features=out_channels,
-                    heads=1,
-                    concat=True,
-                    dropout=dropout,
-                    bias=bias
-                )
-            )
-        else:
-            self.layers.append(
-                ProjectiveGraphConv(
-                    in_features=hidden_channels,
-                    out_features=out_channels,
-                    use_attention=False,
+                    out_features=hidden_channels,
                     bias=bias
                 )
             )
             
+        # Output layer
+        self.layers.append(
+            ProjectiveSAGEConv(
+                in_features=hidden_channels,
+                out_features=out_channels,
+                bias=bias
+            )
+        )
+        
+    def projective_dropout(self, x: torch.Tensor, p: float) -> torch.Tensor:
+        """Apply dropout while preserving projective structure."""
+        if not self.training or p == 0:
+            return x
+            
+        # Create dropout mask
+        mask = torch.bernoulli(torch.full_like(x[..., :-1], 1 - p))
+        
+        # Add ones for homogeneous coordinate
+        mask = torch.cat([mask, torch.ones_like(mask[..., :1])], dim=-1)
+        
+        # Apply mask while preserving projective structure
+        dropped = x * mask
+        
+        # Normalize to maintain projective structure
+        norm = torch.norm(dropped, p=2, dim=-1, keepdim=True)
+        return dropped / (norm + 1e-8)
+        
     def forward(
         self,
         x: torch.Tensor,
@@ -125,17 +98,28 @@ class ProjectiveGraphSAGE(nn.Module):
         Returns:
             Node embeddings
         """
+        # Add homogeneous coordinate to input
+        x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
+        
         # Forward pass through all layers
         for i, layer in enumerate(self.layers):
             # Apply layer
             x = layer(x, edge_index)
             
-            # Apply activation for all but last layer
+            # Add homogeneous coordinate back
             if i < len(self.layers) - 1:
-                x = F.relu(x)
+                x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
                 
-            # Apply dropout
-            if self.training and i < len(self.layers) - 1:
-                x = F.dropout(x, p=self.dropout, training=True)
+                # Apply projective ReLU
+                x_features = x[..., :-1]
+                x_features = F.relu(x_features)
+                x = torch.cat([x_features, x[..., -1:]], dim=-1)
+                
+                # Normalize to maintain projective structure
+                norm = torch.norm(x, p=2, dim=-1, keepdim=True)
+                x = x / (norm + 1e-8)
+                
+                # Apply projective dropout
+                x = self.projective_dropout(x, self.dropout)
                 
         return x

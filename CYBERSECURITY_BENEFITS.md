@@ -373,120 +373,137 @@ scan_patterns = {
 
 ## Core Benefits
 
-1. Geometric Pattern Recognition
-- Uses projective geometry to identify malicious patterns
-- Cross-ratio preservation ensures pattern recognition despite transformations
-- Robust against common evasion techniques
+1. **Geometric Pattern Recognition**
+   - Pure projective geometry approach for robust pattern detection
+   - Cross-ratio preservation ensures invariance to transformations
+   - Hyperbolic space captures hierarchical threat relationships
+   - Improved detection of subtle attack patterns
 
-2. Feature Space Benefits
-- Hyperbolic embeddings capture hierarchical threat relationships
-- Projective transformations preserve pattern structure
-- Efficient representation of complex attack patterns
+2. **Feature Extraction**
+   - Invariant feature representations using projective operations
+   - Robust against evasion techniques and data transformations
+   - Captures complex relationships between security events
+   - Maintains geometric structure of threat indicators
 
-3. Anomaly Detection
-- Geometric distance metrics for outlier detection
-- Cross-ratio based similarity measures
-- Robust against mimicry attacks
+3. **Anomaly Detection**
+   - Hyperbolic distance metrics for better outlier detection
+   - Cross-ratio based scoring for robust anomaly identification
+   - Projective transformations preserve security-relevant patterns
+   - Improved detection of novel attack vectors
 
-4. Metric Learning
-- Learns optimal threat similarity metrics
-- Adapts to evolving attack patterns
-- Preserves geometric invariants
+4. **Metric Learning**
+   - UHG-aware similarity measures for threat comparison
+   - Projective distance metrics for robust clustering
+   - Cross-ratio preservation in learned embeddings
+   - Better separation of benign and malicious patterns
 
-5. Attention Mechanisms
-- Multi-head attention for pattern analysis
-- Cross-ratio preserving attention weights
-- Geometric relationship learning
+5. **Attention Mechanisms**
+   - Projective attention for focusing on relevant threat indicators
+   - Cross-ratio based importance weighting
+   - Hyperbolic attention for hierarchical threat analysis
+   - Improved correlation of related security events
 
-## New: Threat Correlation Benefits
+## Graph Neural Network Benefits
 
-1. Indicator Correlation
-- Links different types of threat indicators:
-  - Network indicators (IPs, domains, traffic patterns)
-  - System indicators (files, registry, processes)
-  - Behavioral indicators (API calls, memory operations)
-  - Payload indicators (code patterns, configurations)
-- Preserves relationships under attacker evasion attempts
-- Uses projective geometry for robust pattern matching
+1. **UHG-Compliant GraphSAGE**
+   - Pure projective operations for message passing
+   - Cross-ratio preserving neighborhood aggregation
+   - Robust against adversarial perturbations
+   - Key advantages:
+     * Preserves neighborhood structure in projective space
+     * Maintains geometric relationships between nodes
+     * Invariant to common evasion techniques
+     * Better captures hierarchical threat patterns
 
-2. Cross-Type Pattern Recognition
-- Identifies complex attack chains across indicator types
-- Examples:
-  - Network traffic → System changes → Behavioral patterns
-  - Payload analysis → Network communication → Process behavior
-- Maintains pattern structure despite obfuscation
+2. **Graph Learning Improvements**
+   - Enhanced node representation learning:
+     * Projective transformations preserve security-relevant structure
+     * Cross-ratio based aggregation maintains geometric patterns
+     * Better capture of threat propagation patterns
+     * Improved detection of coordinated attacks
 
-3. Relationship Analysis
-- Network-System Relationships:
-  - Links network IOCs to system artifacts
-  - Tracks attack progression through system
-  - Resistant to connection masking
+3. **Network Analysis Benefits**
+   - Improved threat graph analysis:
+     * Better understanding of attack propagation
+     * More robust detection of malicious subgraphs
+     * Enhanced identification of attack entry points
+     * Better correlation of related security events
 
-- Network-Behavior Relationships:
-  - Maps network patterns to process behavior
-  - Identifies command and control activity
-  - Robust against protocol manipulation
+4. **Operational Advantages**
+   - Real-world deployment benefits:
+     * Scalable to large security graphs
+     * Efficient GPU acceleration support
+     * Numerically stable implementations
+     * Production-ready with comprehensive testing
 
-- System-Behavior Relationships:
-  - Correlates system changes with behaviors
-  - Tracks malware execution patterns
-  - Resistant to rootkit techniques
+## Implementation Features
 
-- Payload Relationships:
-  - Links malicious code across contexts
-  - Identifies related attack tools
-  - Robust against code obfuscation
+1. **Code Quality**
+   - Comprehensive test coverage
+   - Strict adherence to UHG principles
+   - Numerically stable operations
+   - Production-ready implementation
 
-4. Real-World Applications
+2. **Integration Support**
+   - Easy integration with existing security tools
+   - Flexible API design
+   - Clear documentation and examples
+   - Extensive test suite for validation
 
-APT Detection:
-- Correlates diverse indicator types
-- Tracks attack progression
-- Maps campaign patterns
-- Identifies novel techniques
+3. **Performance Optimizations**
+   - GPU acceleration support
+   - Efficient sparse operations
+   - Batched processing capabilities
+   - Memory-efficient implementations
 
-Zero-Day Detection:
-- Groups related novel indicators
-- Maps unknown threats to known patterns
-- Discovers new attack techniques
-- Early warning system
+4. **Deployment Features**
+   - PyPI package distribution
+   - Clear version management
+   - Comprehensive documentation
+   - Regular security updates
 
-Threat Hunting:
-- Query relationships between indicators
-- Find hidden connections
-- Discover attack patterns
-- Track threat evolution
+## Use Cases
 
-Incident Response:
-- Group related indicators
-- Track attack spread
-- Identify affected systems
-- Prioritize response actions
+1. **Intrusion Detection**
+   - Graph-based attack detection
+   - Anomaly identification in network traffic
+   - Zero-day attack detection
+   - APT campaign identification
 
-Threat Intelligence:
-- Correlate indicators across sources
-- Discover attack campaigns
-- Share indicator relationships
-- Track threat actor TTPs
+2. **Threat Hunting**
+   - Pattern-based threat discovery
+   - Behavioral anomaly detection
+   - Attack campaign correlation
+   - Lateral movement detection
 
-5. Technical Advantages
+3. **Alert Correlation**
+   - Graph-based alert clustering
+   - Attack pattern identification
+   - Campaign attribution
+   - Impact assessment
 
-Pattern Preservation:
-- Cross-ratio preservation ensures pattern recognition
-- Projective transformations maintain relationships
-- Geometric invariants resist evasion
+4. **Threat Intelligence**
+   - IOC relationship analysis
+   - Campaign tracking
+   - Attribution analysis
+   - Threat actor profiling
 
-Scalability:
-- Efficient processing of high-dimensional data
-- Multi-head attention parallelizes analysis
-- Optimized for large-scale deployments
+## Future Directions
 
-Adaptability:
-- Learns new threat patterns
-- Updates relationship models
-- Evolves with threat landscape
+1. **Planned Improvements**
+   - Additional graph neural network architectures
+   - Enhanced visualization capabilities
+   - More security-specific features
+   - Advanced threat correlation methods
 
-Integration:
-- Supports standard indicator formats
-- Interfaces with existing security tools
-- Real-time processing capability 
+2. **Research Areas**
+   - Novel UHG-based security metrics
+   - Advanced graph learning techniques
+   - Improved attack detection methods
+   - Enhanced threat correlation approaches
+
+3. **Community Contributions**
+   - Open source collaboration
+   - Security research partnerships
+   - Industry feedback integration
+   - Continuous improvement process 
