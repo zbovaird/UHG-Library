@@ -228,3 +228,179 @@ class ProjectiveUHG:
         """
         # For the absolute conic x^2 + y^2 = z^2, the polar is simple
         return self.normalize_points(line)
+        
+    def normalize(self, points: torch.Tensor) -> torch.Tensor:
+        """Normalize points to unit norm.
+        
+        Args:
+            points: Points to normalize
+            
+        Returns:
+            Normalized points
+        """
+        norm = torch.norm(points, p=2, dim=-1, keepdim=True)
+        return points / (norm + 1e-8)
+        
+    def distance(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
+        """Compute projective distance between two points.
+        
+        Args:
+            p1, p2: Points in projective space
+            
+        Returns:
+            Distance value
+        """
+        # Extract features (ignore homogeneous coordinate)
+        p1_feat = p1[:-1]
+        p2_feat = p2[:-1]
+        
+        # Normalize features
+        p1_feat = p1_feat / (torch.norm(p1_feat, p=2) + 1e-8)
+        p2_feat = p2_feat / (torch.norm(p2_feat, p=2) + 1e-8)
+        
+        # Compute distance using cosine similarity
+        cos_sim = torch.sum(p1_feat * p2_feat)
+        # Map from [-1, 1] to [0, 2] for better numerical stability
+        return torch.sqrt(2 * (1 - cos_sim.clamp(-1 + 1e-8, 1 - 1e-8)))
+        
+    def cross_ratio(self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor) -> torch.Tensor:
+        """Compute cross-ratio of four points.
+        
+        Args:
+            p1, p2, p3, p4: Points in projective space
+            
+        Returns:
+            Cross-ratio value
+        """
+        # Extract features (ignore homogeneous coordinate)
+        p1_feat = p1[:-1]
+        p2_feat = p2[:-1]
+        p3_feat = p3[:-1]
+        p4_feat = p4[:-1]
+        
+        # Normalize features
+        p1_feat = p1_feat / (torch.norm(p1_feat, p=2) + 1e-8)
+        p2_feat = p2_feat / (torch.norm(p2_feat, p=2) + 1e-8)
+        p3_feat = p3_feat / (torch.norm(p3_feat, p=2) + 1e-8)
+        p4_feat = p4_feat / (torch.norm(p4_feat, p=2) + 1e-8)
+        
+        # Compute distances
+        d13 = torch.norm(p1_feat - p3_feat, p=2)
+        d24 = torch.norm(p2_feat - p4_feat, p=2)
+        d14 = torch.norm(p1_feat - p4_feat, p=2)
+        d23 = torch.norm(p2_feat - p3_feat, p=2)
+        
+        # Add small epsilon to prevent division by zero
+        eps = 1e-8
+        
+        # Compute cross-ratio with numerical stability
+        # Use log-space computation to prevent overflow/underflow
+        log_cr = torch.log(d13 + eps) + torch.log(d24 + eps) - torch.log(d14 + eps) - torch.log(d23 + eps)
+        cr = torch.exp(log_cr)
+        
+        return cr
+        
+    def transform(self, points: torch.Tensor, matrix: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Apply projective transformation to points.
+        
+        Args:
+            points: Points to transform
+            matrix: Optional transformation matrix
+            
+        Returns:
+            Transformed points
+        """
+        if matrix is None:
+            matrix = torch.eye(points.shape[-1], device=points.device)
+            
+        # Ensure matrix has correct dimensions
+        if points.shape[-1] != matrix.shape[-1]:
+            # Add row and column for homogeneous coordinate
+            pad_size = points.shape[-1] - matrix.shape[-1]
+            if pad_size > 0:
+                pad = torch.zeros(matrix.shape[0] + pad_size, matrix.shape[1] + pad_size, device=points.device)
+                pad[:matrix.shape[0], :matrix.shape[1]] = matrix
+                pad[-1, -1] = 1.0
+                matrix = pad
+            else:
+                # Truncate matrix if needed
+                matrix = matrix[:points.shape[-1], :points.shape[-1]]
+                
+        # Apply transformation
+        transformed = torch.matmul(points, matrix.t())
+        
+        # Normalize features
+        features = transformed[..., :-1]
+        homogeneous = transformed[..., -1:]
+        norm = torch.norm(features, p=2, dim=-1, keepdim=True)
+        features = features / (norm + 1e-8)
+        
+        return torch.cat([features, homogeneous], dim=-1)
+        
+    def scale(self, points: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+        """Scale points while preserving projective structure.
+        
+        Args:
+            points: Points to scale
+            scale: Scale factor
+            
+        Returns:
+            Scaled points
+        """
+        # Extract features and homogeneous coordinate
+        features = points[..., :-1]
+        homogeneous = points[..., -1:]
+        
+        # Apply scale to features
+        scaled_features = features * scale
+        
+        # Normalize features
+        norm = torch.norm(scaled_features, p=2, dim=-1, keepdim=True)
+        scaled_features = scaled_features / (norm + 1e-8)
+        
+        return torch.cat([scaled_features, homogeneous], dim=-1)
+        
+    def aggregate(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+        """Aggregate points using weighted average.
+        
+        Args:
+            points: Points to aggregate
+            weights: Aggregation weights
+            
+        Returns:
+            Aggregated points
+        """
+        # Apply weights
+        weighted = torch.matmul(weights, points)
+        
+        # Normalize features
+        features = weighted[..., :-1]
+        homogeneous = weighted[..., -1:]
+        norm = torch.norm(features, p=2, dim=-1, keepdim=True)
+        features = features / (norm + 1e-8)
+        
+        return torch.cat([features, homogeneous], dim=-1)
+        
+    def projective_average(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+        """Compute weighted average of points in projective space.
+        
+        Args:
+            points: Points to average [N, D+1]
+            weights: Weights for averaging [N]
+            
+        Returns:
+            Averaged point [D+1]
+        """
+        # Extract features and homogeneous coordinates
+        features = points[..., :-1]
+        homogeneous = points[..., -1:]
+        
+        # Apply weights
+        weighted_features = torch.sum(features * weights.unsqueeze(-1), dim=0)
+        weighted_homogeneous = torch.sum(homogeneous * weights.unsqueeze(-1), dim=0)
+        
+        # Normalize features
+        norm = torch.norm(weighted_features, p=2, dim=-1, keepdim=True)
+        weighted_features = weighted_features / (norm + 1e-8)
+        
+        return torch.cat([weighted_features, weighted_homogeneous], dim=-1)

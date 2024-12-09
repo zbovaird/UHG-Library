@@ -1,3 +1,9 @@
-from .cross_ratio import compute_cross_ratio, preserve_cross_ratio
+"""UHG utilities."""
 
-__all__ = ["compute_cross_ratio", "preserve_cross_ratio"]
+from .cross_ratio import compute_cross_ratio, verify_cross_ratio_preservation, restore_cross_ratio
+
+__all__ = [
+    'compute_cross_ratio',
+    'verify_cross_ratio_preservation',
+    'restore_cross_ratio'
+]

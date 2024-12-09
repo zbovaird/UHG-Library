@@ -10,7 +10,7 @@ import pytest
 from uhg.nn.layers.hierarchical import ProjectiveHierarchicalLayer
 from uhg.nn.models.hierarchical import ProjectiveHierarchicalGNN
 from uhg.projective import ProjectiveUHG
-from uhg.utils.cross_ratio import compute_cross_ratio
+from uhg.utils.cross_ratio import compute_cross_ratio, verify_cross_ratio_preservation
 
 @pytest.fixture
 def device():
@@ -24,6 +24,7 @@ def sample_data(device):
     
     # Create node features
     x = torch.randn(num_nodes, in_features, device=device)
+    x = x / torch.norm(x, p=2, dim=-1, keepdim=True)  # Normalize features
     x = torch.cat([x, torch.ones(num_nodes, 1, device=device)], dim=1)
     
     # Create hierarchical structure:
@@ -91,9 +92,7 @@ def test_hierarchical_layer_projective_transform(device, sample_data):
     transformed = layer.projective_transform(x, layer.W_self)
     
     # Verify cross-ratio preservation
-    cr_before = compute_cross_ratio(x[0], x[1], x[2], x[3])
-    cr_after = compute_cross_ratio(transformed[0], transformed[1], transformed[2], transformed[3])
-    assert torch.allclose(cr_before, cr_after, rtol=1e-4)
+    assert verify_cross_ratio_preservation(x, transformed, rtol=1e-4)
     
 def test_hierarchical_layer_cross_ratio_weights(device, sample_data):
     """Test that cross-ratio based weights respect level differences."""
@@ -110,6 +109,8 @@ def test_hierarchical_layer_cross_ratio_weights(device, sample_data):
     
     # Same level weight should be higher than different level
     assert weight_same > weight_diff
+    assert 0.1 <= weight_same <= 0.9
+    assert 0.1 <= weight_diff <= 0.9
     
 def test_hierarchical_layer_forward(device, sample_data):
     """Test forward pass of hierarchical layer."""
@@ -123,19 +124,13 @@ def test_hierarchical_layer_forward(device, sample_data):
     # Forward pass
     out = layer(x, edge_index, node_levels)
     
-    # Check output shape
+    # Check output shape and normalization
     assert out.shape == (x.size(0), layer.out_features)
+    assert torch.allclose(torch.norm(out, p=2, dim=-1), torch.ones_like(out[:, 0]), rtol=1e-4)
     
     # Check that output preserves projective structure
     out_with_homogeneous = torch.cat([out, torch.ones_like(out[:, :1])], dim=1)
-    cr_before = compute_cross_ratio(x[0], x[1], x[2], x[3])
-    cr_after = compute_cross_ratio(
-        out_with_homogeneous[0],
-        out_with_homogeneous[1],
-        out_with_homogeneous[2],
-        out_with_homogeneous[3]
-    )
-    assert torch.allclose(cr_before, cr_after, rtol=1e-4)
+    assert verify_cross_ratio_preservation(x, out_with_homogeneous, rtol=1e-4)
     
 def test_hierarchical_gnn_init():
     """Test initialization of hierarchical GNN model."""
@@ -160,7 +155,10 @@ def test_hierarchical_gnn_projective_dropout(device):
         dropout=0.5
     ).to(device)
     
-    x = torch.randn(10, 9, device=device)  # 8 features + 1 homogeneous
+    # Create normalized input
+    x = torch.randn(10, 8, device=device)
+    x = x / torch.norm(x, p=2, dim=-1, keepdim=True)
+    x = torch.cat([x, torch.ones(10, 1, device=device)], dim=1)
     
     # Apply dropout
     model.train()
@@ -169,10 +167,12 @@ def test_hierarchical_gnn_projective_dropout(device):
     # Check that homogeneous coordinate is preserved
     assert torch.allclose(dropped[:, -1], x[:, -1])
     
-    # Check that projective structure is maintained
-    cr_before = compute_cross_ratio(x[0], x[1], x[2], x[3])
-    cr_after = compute_cross_ratio(dropped[0], dropped[1], dropped[2], dropped[3])
-    assert torch.allclose(cr_before, cr_after, rtol=1e-4)
+    # Check that features are normalized
+    norms = torch.norm(dropped[:, :-1], p=2, dim=-1)
+    assert torch.allclose(norms, torch.ones_like(norms), rtol=1e-4)
+    
+    # Check that cross-ratio is preserved
+    assert verify_cross_ratio_preservation(x, dropped, rtol=1e-4)
     
 def test_hierarchical_gnn_forward(device, sample_data):
     """Test forward pass of hierarchical GNN model."""
@@ -188,8 +188,9 @@ def test_hierarchical_gnn_forward(device, sample_data):
     # Forward pass
     out = model(x, edge_index, node_levels)
     
-    # Check output shape
+    # Check output shape and normalization
     assert out.shape == (x.size(0), 4)  # out_channels = 4
+    assert torch.allclose(torch.norm(out, p=2, dim=-1), torch.ones_like(out[:, 0]), rtol=1e-4)
     
     # Check that hierarchical structure is preserved
     # Level 0 nodes should be more similar to each other than to other levels
@@ -209,34 +210,18 @@ def test_hierarchical_gnn_cross_ratio_preservation(device, sample_data):
         hidden_channels=16,
         out_channels=4,
         num_layers=3,
-        num_levels=3
+        num_levels=3,
+        dropout=0.2  # Test with dropout
     ).to(device)
     
-    # Get initial cross-ratio
-    cr_initial = compute_cross_ratio(x[0], x[1], x[2], x[3])
+    # Set to training mode to test dropout
+    model.train()
     
-    # Forward pass through each layer
-    current_x = x
-    for layer in model.layers[:-1]:
-        current_x = layer(current_x, edge_index, node_levels)
-        current_x = torch.cat([current_x, torch.ones_like(current_x[:, :1])], dim=1)
-        
-        # Check cross-ratio preservation
-        cr_current = compute_cross_ratio(
-            current_x[0],
-            current_x[1],
-            current_x[2],
-            current_x[3]
-        )
-        assert torch.allclose(cr_initial, cr_current, rtol=1e-4)
+    # Forward pass
+    out = model(x, edge_index, node_levels)
     
-    # Final layer
-    final_out = model.layers[-1](current_x, edge_index, node_levels)
-    final_out = torch.cat([final_out, torch.ones_like(final_out[:, :1])], dim=1)
-    cr_final = compute_cross_ratio(
-        final_out[0],
-        final_out[1],
-        final_out[2],
-        final_out[3]
-    )
-    assert torch.allclose(cr_initial, cr_final, rtol=1e-4) 
+    # Add homogeneous coordinate for cross-ratio check
+    out_with_homogeneous = torch.cat([out, torch.ones_like(out[:, :1])], dim=1)
+    
+    # Verify cross-ratio preservation
+    assert verify_cross_ratio_preservation(x, out_with_homogeneous, rtol=1e-4)

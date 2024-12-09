@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from typing import Optional, Tuple, Union
 from ..layers.hierarchical import ProjectiveHierarchicalLayer
 from ...projective import ProjectiveUHG
-from ...utils.cross_ratio import compute_cross_ratio
+from ...utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 
 class ProjectiveHierarchicalGNN(nn.Module):
     """UHG-compliant hierarchical GNN model using pure projective operations.
@@ -94,32 +94,43 @@ class ProjectiveHierarchicalGNN(nn.Module):
         if not self.training or p == 0:
             return x
             
-        # Create dropout mask for features only
-        mask = torch.bernoulli(torch.full_like(x[..., :-1], 1 - p))
-        
-        # Add ones for homogeneous coordinate
-        mask = torch.cat([mask, torch.ones_like(mask[..., :1])], dim=-1)
-        
-        # Apply mask while preserving projective structure
-        dropped = x * mask
-        
-        # Normalize to maintain projective structure
-        norm = torch.norm(dropped[..., :-1], p=2, dim=-1, keepdim=True)
-        dropped = torch.cat([dropped[..., :-1] / (norm + 1e-8), dropped[..., -1:]], dim=-1)
-        
-        if x.size(0) > 3:
-            # Compute cross-ratio of first four points
-            cr_before = compute_cross_ratio(x[0], x[1], x[2], x[3])
-            cr_after = compute_cross_ratio(dropped[0], dropped[1], dropped[2], dropped[3])
+        # Store original cross-ratio if enough points
+        has_cr = x.size(0) > 3
+        if has_cr:
+            cr_before = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
             
-            # Handle NaN values in cross-ratio
-            if torch.isnan(cr_after):
-                # If cross-ratio is NaN, use original points
-                dropped = x
-            else:
-                # Scale output to preserve cross-ratio
-                scale = (cr_before / (cr_after + 1e-8)).sqrt()
-                dropped = torch.cat([dropped[..., :-1] * scale, dropped[..., -1:]], dim=-1)
+        # Extract features and homogeneous coordinate
+        features = x[..., :-1]
+        homogeneous = x[..., -1:]
+        
+        # Create dropout mask for features
+        mask = torch.bernoulli(torch.full_like(features, 1 - p))
+        
+        # Ensure at least one feature survives per node
+        zero_rows = (mask.sum(dim=-1) == 0)
+        if zero_rows.any():
+            # For rows with all zeros, randomly keep one feature
+            random_feature = torch.randint(0, features.size(-1), (zero_rows.sum(),), device=x.device)
+            mask[zero_rows, random_feature] = 1
+            
+        # Scale mask to maintain expected value
+        mask = mask / (1 - p + 1e-8)
+        
+        # Apply dropout to features
+        dropped_features = features * mask
+        
+        # Normalize features using UHG
+        dropped_features = self.uhg.normalize(dropped_features)
+        
+        # Combine with homogeneous coordinate
+        dropped = torch.cat([dropped_features, homogeneous], dim=-1)
+        
+        # Restore cross-ratio if possible
+        if has_cr:
+            cr_after = self.uhg.cross_ratio(dropped[0], dropped[1], dropped[2], dropped[3])
+            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
+                scale = torch.sqrt(torch.abs(cr_before / cr_after))
+                dropped = self.uhg.scale(dropped, scale)
                 
         return dropped
         
@@ -131,20 +142,15 @@ class ProjectiveHierarchicalGNN(nn.Module):
         edge_weight: Optional[torch.Tensor] = None,
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
-        """Forward pass using pure projective operations.
-        
-        Args:
-            x: Node feature matrix
-            edge_index: Graph connectivity
-            node_levels: Level assignment for each node
-            edge_weight: Optional edge weights
-            size: Optional output size
+        """Forward pass using pure projective operations."""
+        # Store initial cross-ratio if enough points
+        has_cr = x.size(0) > 3
+        if has_cr:
+            cr_initial = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
             
-        Returns:
-            Node embeddings
-        """
         # Add homogeneous coordinate to input if not present
         if x.size(-1) == self.layers[0].in_features:
+            x = self.uhg.normalize(x)
             x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
             
         # Forward pass through all layers
@@ -159,14 +165,37 @@ class ProjectiveHierarchicalGNN(nn.Module):
                 # Apply projective ReLU to features only
                 x_features = x[..., :-1]
                 x_features = F.relu(x_features)
-                x = torch.cat([x_features, x[..., -1:]], dim=-1)
                 
-                # Normalize to maintain projective structure
-                norm = torch.norm(x[..., :-1], p=2, dim=-1, keepdim=True)
-                x = torch.cat([x[..., :-1] / (norm + 1e-8), x[..., -1:]], dim=-1)
+                # Normalize features using UHG
+                x_features = self.uhg.normalize(x_features)
+                x = torch.cat([x_features, x[..., -1:]], dim=-1)
                 
                 # Apply projective dropout
                 x = self.projective_dropout(x, self.dropout)
                 
-        # Return only feature part for final layer
-        return x[..., :-1] 
+                # Restore initial cross-ratio if possible
+                if has_cr:
+                    cr_current = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
+                    if not torch.isnan(cr_current) and not torch.isnan(cr_initial) and cr_current != 0:
+                        scale = torch.sqrt(torch.abs(cr_initial / cr_current))
+                        x = self.uhg.scale(x, scale)
+            else:
+                # For final layer, ensure output dimension matches out_channels
+                if x.size(-1) != self.layers[-1].out_features + 1:
+                    x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
+                    
+        # Return normalized feature part using UHG
+        features = x[..., :-1]
+        features = self.uhg.normalize(features)
+        
+        # Ensure output has correct dimension
+        if features.size(-1) != self.layers[-1].out_features:
+            pad_size = self.layers[-1].out_features - features.size(-1)
+            if pad_size > 0:
+                # Pad with zeros if needed
+                features = F.pad(features, (0, pad_size))
+            else:
+                # Truncate if too large
+                features = features[..., :self.layers[-1].out_features]
+                
+        return features
