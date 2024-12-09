@@ -192,30 +192,53 @@ class ProjectiveUHG:
         # Compute cross-ratio
         return (d12 * d34) / (d13 * d24 + 1e-8)
         
-    def projective_average(self, points: torch.Tensor, weights: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Compute weighted average in projective space.
+    def projective_average(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+        """Compute weighted average of points in projective space.
         
         Args:
-            points: Points to average (shape: [num_points, *point_dims])
-            weights: Optional weights for each point (shape: [num_points])
+            points: Points to average [N, D+1] or [B, N, D+1]
+            weights: Weights for averaging [N]
             
         Returns:
-            Weighted average point
+            Averaged point [D+1] or [B, D+1]
         """
-        if weights is None:
-            weights = torch.ones(points.shape[0], device=points.device)
-            weights = weights / weights.sum()
+        # Handle batched input
+        if points.dim() == 3:
+            B, N, D = points.shape
+            # Reshape points to [B*N, D]
+            points_flat = points.reshape(-1, D)
+            # Repeat weights for each batch
+            weights_flat = weights.repeat(B)
+            # Compute average
+            avg = self._projective_average_unbatched(points_flat, weights_flat)
+            # Reshape back to [B, D]
+            return avg.reshape(B, D)
+        else:
+            return self._projective_average_unbatched(points, weights)
             
-        # Normalize weights
-        weights = weights / weights.sum()
+    def _projective_average_unbatched(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+        """Compute weighted average of unbatched points in projective space.
         
-        # Reshape weights for broadcasting
-        weights = weights.view(-1, *([1] * (points.dim() - 1)))
+        Args:
+            points: Points to average [N, D+1]
+            weights: Weights for averaging [N]
+            
+        Returns:
+            Averaged point [D+1]
+        """
+        # Extract features and homogeneous coordinates
+        features = points[..., :-1]
+        homogeneous = points[..., -1:]
         
-        # Compute weighted sum
-        avg = torch.sum(points * weights, dim=0)
+        # Apply weights
+        weighted_features = torch.sum(features * weights.unsqueeze(-1), dim=0)
+        weighted_homogeneous = torch.sum(homogeneous * weights.unsqueeze(-1), dim=0)
         
-        return self.normalize_points(avg)
+        # Normalize features
+        norm = torch.norm(weighted_features, p=2, dim=-1, keepdim=True)
+        weighted_features = weighted_features / (norm + 1e-8)
+        
+        return torch.cat([weighted_features, weighted_homogeneous], dim=-1)
         
     def absolute_polar(self, line: torch.Tensor) -> torch.Tensor:
         """Get the polar of a line with respect to the absolute conic.
@@ -326,6 +349,11 @@ class ProjectiveUHG:
                 # Truncate matrix if needed
                 matrix = matrix[:points.shape[-1], :points.shape[-1]]
                 
+        # Store original cross-ratio if enough points
+        has_cr = points.size(0) > 3
+        if has_cr:
+            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
+            
         # Apply transformation
         transformed = torch.matmul(points, matrix.t())
         
@@ -334,8 +362,20 @@ class ProjectiveUHG:
         homogeneous = transformed[..., -1:]
         norm = torch.norm(features, p=2, dim=-1, keepdim=True)
         features = features / (norm + 1e-8)
+        transformed = torch.cat([features, homogeneous], dim=-1)
         
-        return torch.cat([features, homogeneous], dim=-1)
+        # Restore cross-ratio if needed
+        if has_cr:
+            cr_after = self.cross_ratio(transformed[0], transformed[1], transformed[2], transformed[3])
+            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
+                scale = torch.sqrt(torch.abs(cr_before / cr_after))
+                features = transformed[..., :-1] * scale
+                # Re-normalize after scaling
+                norm = torch.norm(features, p=2, dim=-1, keepdim=True)
+                features = features / (norm + 1e-8)
+                transformed = torch.cat([features, transformed[..., -1:]], dim=-1)
+                
+        return transformed
         
     def scale(self, points: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         """Scale points while preserving projective structure.
@@ -347,6 +387,11 @@ class ProjectiveUHG:
         Returns:
             Scaled points
         """
+        # Store original cross-ratio if enough points
+        has_cr = points.size(0) > 3
+        if has_cr:
+            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
+            
         # Extract features and homogeneous coordinate
         features = points[..., :-1]
         homogeneous = points[..., -1:]
@@ -357,8 +402,20 @@ class ProjectiveUHG:
         # Normalize features
         norm = torch.norm(scaled_features, p=2, dim=-1, keepdim=True)
         scaled_features = scaled_features / (norm + 1e-8)
+        scaled = torch.cat([scaled_features, homogeneous], dim=-1)
         
-        return torch.cat([scaled_features, homogeneous], dim=-1)
+        # Restore cross-ratio if needed
+        if has_cr:
+            cr_after = self.cross_ratio(scaled[0], scaled[1], scaled[2], scaled[3])
+            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
+                scale = torch.sqrt(torch.abs(cr_before / cr_after))
+                features = scaled[..., :-1] * scale
+                # Re-normalize after scaling
+                norm = torch.norm(features, p=2, dim=-1, keepdim=True)
+                features = features / (norm + 1e-8)
+                scaled = torch.cat([features, scaled[..., -1:]], dim=-1)
+                
+        return scaled
         
     def aggregate(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
         """Aggregate points using weighted average.
@@ -370,6 +427,11 @@ class ProjectiveUHG:
         Returns:
             Aggregated points
         """
+        # Store original cross-ratio if enough points
+        has_cr = points.size(0) > 3
+        if has_cr:
+            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
+            
         # Apply weights
         weighted = torch.matmul(weights, points)
         
