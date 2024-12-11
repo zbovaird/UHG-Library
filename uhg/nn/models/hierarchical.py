@@ -125,12 +125,11 @@ class ProjectiveHierarchicalGNN(nn.Module):
         # Combine with homogeneous coordinate
         dropped = torch.cat([dropped_features, homogeneous], dim=-1)
         
-        # Restore cross-ratio if possible
+        # Restore cross-ratio if needed
         if has_cr:
             cr_after = self.uhg.cross_ratio(dropped[0], dropped[1], dropped[2], dropped[3])
             if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
-                scale = torch.sqrt(torch.abs(cr_before / cr_after))
-                dropped = self.uhg.scale(dropped, scale)
+                dropped = self.uhg.scale(dropped, torch.sqrt(torch.abs(cr_before / cr_after)))
                 
         return dropped
         
@@ -177,8 +176,7 @@ class ProjectiveHierarchicalGNN(nn.Module):
                 if has_cr:
                     cr_current = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
                     if not torch.isnan(cr_current) and not torch.isnan(cr_initial) and cr_current != 0:
-                        scale = torch.sqrt(torch.abs(cr_initial / cr_current))
-                        x = self.uhg.scale(x, scale)
+                        x = self.uhg.scale(x, torch.sqrt(torch.abs(cr_initial / cr_current)))
             else:
                 # For final layer, ensure output dimension matches out_channels
                 if x.size(-1) != self.layers[-1].out_features + 1:

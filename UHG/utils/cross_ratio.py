@@ -15,8 +15,25 @@ def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4
     Returns:
         Cross-ratio value
     """
-    uhg = ProjectiveUHG()
-    return uhg.cross_ratio(p1, p2, p3, p4)
+    # Extract features and homogeneous coordinates
+    p1_features = p1[..., :-1]
+    p2_features = p2[..., :-1]
+    p3_features = p3[..., :-1]
+    p4_features = p4[..., :-1]
+    
+    # Compute distances in feature space
+    d13 = torch.norm(p1_features - p3_features, p=2, dim=-1)
+    d24 = torch.norm(p2_features - p4_features, p=2, dim=-1)
+    d14 = torch.norm(p1_features - p4_features, p=2, dim=-1)
+    d23 = torch.norm(p2_features - p3_features, p=2, dim=-1)
+    
+    # Add small epsilon to prevent division by zero
+    eps = 1e-8
+    
+    # Compute cross-ratio in log space for better numerical stability
+    log_cr = torch.log(d13 + eps) + torch.log(d24 + eps) - torch.log(d14 + eps) - torch.log(d23 + eps)
+    
+    return torch.exp(log_cr)
 
 def verify_cross_ratio_preservation(
     points_before: torch.Tensor,
@@ -36,32 +53,47 @@ def verify_cross_ratio_preservation(
     if points_before.size(0) < 4 or points_after.size(0) < 4:
         return True  # Not enough points to compute cross-ratio
         
-    uhg = ProjectiveUHG()
+    # Compute cross-ratios for all possible quadruples
+    N = points_before.size(0)
+    preserved = True
     
-    # Compute cross-ratios
-    cr_before = uhg.cross_ratio(
-        points_before[0],
-        points_before[1],
-        points_before[2],
-        points_before[3]
-    )
-    
-    cr_after = uhg.cross_ratio(
-        points_after[0],
-        points_after[1],
-        points_after[2],
-        points_after[3]
-    )
-    
-    # Check if cross-ratios are valid
-    if torch.isnan(cr_before) or torch.isnan(cr_after):
-        return False
-        
-    # Compare cross-ratios in log space for better numerical stability
-    log_cr_before = torch.log(cr_before + 1e-8)
-    log_cr_after = torch.log(cr_after + 1e-8)
-    
-    return torch.allclose(log_cr_before, log_cr_after, rtol=rtol)
+    for i in range(N-3):
+        for j in range(i+1, N-2):
+            for k in range(j+1, N-1):
+                for l in range(k+1, N):
+                    cr_before = compute_cross_ratio(
+                        points_before[i],
+                        points_before[j],
+                        points_before[k],
+                        points_before[l]
+                    )
+                    
+                    cr_after = compute_cross_ratio(
+                        points_after[i],
+                        points_after[j],
+                        points_after[k],
+                        points_after[l]
+                    )
+                    
+                    # Skip if either cross-ratio is invalid
+                    if torch.isnan(cr_before) or torch.isnan(cr_after):
+                        continue
+                        
+                    # Compare cross-ratios in log space
+                    log_cr_before = torch.log(cr_before + 1e-8)
+                    log_cr_after = torch.log(cr_after + 1e-8)
+                    
+                    if not torch.allclose(log_cr_before, log_cr_after, rtol=rtol):
+                        preserved = False
+                        break
+                        
+            if not preserved:
+                break
+                
+        if not preserved:
+            break
+            
+    return preserved
 
 def restore_cross_ratio(
     points: torch.Tensor,
@@ -81,10 +113,8 @@ def restore_cross_ratio(
     if points.size(0) < 4:
         return points
         
-    uhg = ProjectiveUHG()
-    
     # Compute current cross-ratio
-    current_cr = uhg.cross_ratio(points[0], points[1], points[2], points[3])
+    current_cr = compute_cross_ratio(points[0], points[1], points[2], points[3])
     
     # Check if adjustment is needed
     if torch.isnan(current_cr) or torch.isnan(target_cr) or current_cr == 0:

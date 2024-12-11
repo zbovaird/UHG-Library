@@ -1,9 +1,15 @@
-from .base import ProjectiveLayer
-from .attention import ProjectiveAttention
-from .conv import ProjectiveGraphConv
+"""UHG neural network layers."""
+
+from .base import UHGLayer
+from .conv import UHGConv
+from .attention import UHGAttentionLayer
+from .sage import ProjectiveSAGEConv
+from .hierarchical import ProjectiveHierarchicalLayer
 
 __all__ = [
-    'ProjectiveLayer',
-    'ProjectiveAttention',
-    'ProjectiveGraphConv'
+    'UHGLayer',
+    'UHGConv',
+    'UHGAttentionLayer',
+    'ProjectiveSAGEConv',
+    'ProjectiveHierarchicalLayer'
 ]

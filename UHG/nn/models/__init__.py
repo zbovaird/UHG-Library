@@ -1,3 +1,9 @@
-from .sage import ProjectiveGraphSAGE
+"""UHG neural network models."""
 
-__all__ = ['ProjectiveGraphSAGE']
+from .sage import ProjectiveGraphSAGE
+from .hierarchical import ProjectiveHierarchicalGNN
+
+__all__ = [
+    'ProjectiveGraphSAGE',
+    'ProjectiveHierarchicalGNN'
+]

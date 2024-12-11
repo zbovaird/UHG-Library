@@ -1,17 +1,27 @@
-"""
-Universal Hyperbolic Geometry Neural Network Components.
+"""UHG neural network package."""
 
-This module provides PyTorch implementations of hyperbolic neural network
-layers and operations, specifically designed for graph neural networks
-in hyperbolic space.
-"""
+from .layers import (
+    UHGLayer,
+    UHGConv,
+    UHGAttentionLayer,
+    ProjectiveSAGEConv,
+    ProjectiveHierarchicalLayer
+)
 
-from .layers import ProjectiveLayer, ProjectiveAttention, ProjectiveGraphConv
-from .models import ProjectiveGraphSAGE
+from .models import (
+    ProjectiveGraphSAGE,
+    ProjectiveHierarchicalGNN
+)
 
 __all__ = [
-    'ProjectiveLayer',
-    'ProjectiveAttention',
-    'ProjectiveGraphConv',
-    'ProjectiveGraphSAGE'
+    # Layers
+    'UHGLayer',
+    'UHGConv',
+    'UHGAttentionLayer',
+    'ProjectiveSAGEConv',
+    'ProjectiveHierarchicalLayer',
+    
+    # Models
+    'ProjectiveGraphSAGE',
+    'ProjectiveHierarchicalGNN'
 ] 

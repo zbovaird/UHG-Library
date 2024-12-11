@@ -23,7 +23,7 @@ setup(
         
         # Security features
         "stix2>=3.0.0",           # For threat intelligence
-        "misp-lib>=2.4.134",      # For MISP integration
+        "pymisp>=2.4.134",        # For MISP integration
         "elasticsearch>=7.0.0",    # For Elastic integration
         "splunk-sdk>=1.6.0",      # For Splunk integration
         
@@ -67,5 +67,5 @@ setup(
     ],
     python_requires=">=3.8",
     zip_safe=False,  # Required for mypy to find type hints
-    version="0.2.3",
+    version="0.2.6",
 ) 

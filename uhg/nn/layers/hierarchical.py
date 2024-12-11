@@ -92,17 +92,7 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
     ) -> torch.Tensor:
         """Apply projective transformation preserving cross-ratios."""
         # Use UHG projective transform directly
-        out = self.uhg.transform(x, weight)
-        
-        # Restore cross-ratio if needed
-        if preserve_cr and x.size(0) > 3:
-            cr_before = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
-            cr_after = self.uhg.cross_ratio(out[0], out[1], out[2], out[3])
-            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
-                scale = torch.sqrt(torch.abs(cr_before / cr_after))
-                out = self.uhg.scale(out, scale)
-            
-        return out
+        return self.uhg.transform(x, weight)
         
     def compute_cross_ratio_weight(
         self,
@@ -190,27 +180,36 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         out_parent = self.uhg.aggregate(nodes_parent, adj_parent)
         out_child = self.uhg.aggregate(nodes_child, adj_child)
         
-        # Combine all features using projective average with balanced weights
+        # Stack all points for each node
         points = torch.stack([
             nodes_self,
             out_same,
             out_parent,
             out_child,
             level_features
-        ])
+        ], dim=1)  # [N, 5, D+1]
         
-        # Use balanced weights that sum to 1
+        # Create weights tensor for each node
         weights = torch.tensor([0.3, 0.3, 0.15, 0.15, 0.1], device=x.device)
-        out = self.uhg.projective_average(points, weights)
+        
+        # Average points for each node separately
+        out = torch.stack([
+            self.uhg.projective_average(points[i], weights)
+            for i in range(N)
+        ])
         
         if self.bias is not None:
             # Add bias in projective space with proper normalization
             bias_point = torch.cat([self.bias, torch.ones_like(self.bias[:1])], dim=0)
             bias_point = self.uhg.normalize(bias_point)
-            out = self.uhg.projective_average(
-                torch.stack([out, bias_point.expand_as(out)]),
-                torch.tensor([0.9, 0.1], device=x.device)
-            )
+            bias_weights = torch.tensor([0.9, 0.1], device=x.device)
+            out = torch.stack([
+                self.uhg.projective_average(
+                    torch.stack([out[i], bias_point]),
+                    bias_weights
+                )
+                for i in range(N)
+            ])
             
         # Restore initial cross-ratio if needed
         if has_cr:
@@ -232,6 +231,6 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         # Aggregate features using hierarchical structure
         out = self.aggregate_hierarchical(x, edge_index, node_levels, size)
         
-        # Return normalized feature part using UHG normalization
+        # Return normalized feature part using UHG
         features = out[..., :-1]
         return self.uhg.normalize(features) 

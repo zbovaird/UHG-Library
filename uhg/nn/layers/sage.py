@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import math
-from typing import Optional, Tuple, Union
-from .base import ProjectiveLayer
+from typing import Optional, Tuple, Union, List
+from .base import UHGLayer
 from ...projective import ProjectiveUHG
 
-class ProjectiveSAGEConv(nn.Module):
+class ProjectiveSAGEConv(UHGLayer):
     """UHG-compliant GraphSAGE convolution layer using pure projective operations.
     
     This layer implements the GraphSAGE convolution using only projective geometry,
@@ -14,22 +14,38 @@ class ProjectiveSAGEConv(nn.Module):
     Args:
         in_features: Number of input features
         out_features: Number of output features
+        num_samples: Number of neighbors to sample. If None, use all neighbors
+        aggregator: Aggregation method ('mean', 'max', 'lstm')
         bias: Whether to use bias
     """
     def __init__(
         self,
         in_features: int,
         out_features: int,
+        num_samples: Optional[int] = None,
+        aggregator: str = 'mean',
         bias: bool = True
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.uhg = ProjectiveUHG()
+        self.num_samples = num_samples
+        self.aggregator = aggregator.lower()
+        
+        if self.aggregator not in ['mean', 'max', 'lstm']:
+            raise ValueError(f"Unknown aggregator: {aggregator}")
         
         # Initialize projective transformations
         self.W_self = nn.Parameter(torch.Tensor(out_features, in_features))
         self.W_neigh = nn.Parameter(torch.Tensor(out_features, in_features))
+        
+        # LSTM aggregator if specified
+        if self.aggregator == 'lstm':
+            self.lstm = nn.LSTM(
+                input_size=in_features,
+                hidden_size=in_features,
+                batch_first=True
+            )
         
         if bias:
             self.bias = nn.Parameter(torch.Tensor(out_features))
@@ -43,26 +59,110 @@ class ProjectiveSAGEConv(nn.Module):
         nn.init.orthogonal_(self.W_self)
         nn.init.orthogonal_(self.W_neigh)
         if self.bias is not None:
-            # Initialize bias in projective space
             fan_in = self.in_features
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
             
-    def projective_transform(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        """Apply projective transformation preserving cross-ratios."""
-        # Extract features and homogeneous coordinate
-        features = x[..., :-1]
-        homogeneous = x[..., -1:]
+    def sample_neighbors(
+        self,
+        edge_index: torch.Tensor,
+        num_nodes: int
+    ) -> torch.Tensor:
+        """Sample a fixed number of neighbors for each node."""
+        if self.num_samples is None:
+            return edge_index
+            
+        row, col = edge_index
         
-        # Apply weight to features
-        transformed = torch.matmul(features, weight.t())
+        # Create adjacency list representation
+        adj_list = [[] for _ in range(num_nodes)]
+        for i in range(len(row)):
+            adj_list[row[i].item()].append(col[i].item())
+            
+        # Sample neighbors
+        sampled_rows = []
+        sampled_cols = []
         
-        # Add homogeneous coordinate back
-        out = torch.cat([transformed, homogeneous], dim=-1)
+        for node, neighbors in enumerate(adj_list):
+            if len(neighbors) == 0:
+                continue
+                
+            # Sample with replacement if we need more neighbors than available
+            num_to_sample = min(self.num_samples, len(neighbors))
+            sampled = torch.tensor(neighbors)[torch.randperm(len(neighbors))[:num_to_sample]]
+            
+            sampled_rows.extend([node] * len(sampled))
+            sampled_cols.extend(sampled.tolist())
+            
+        return torch.tensor([sampled_rows, sampled_cols], device=edge_index.device)
         
-        # Normalize to maintain projective structure
-        norm = torch.norm(out[..., :-1], p=2, dim=-1, keepdim=True)
-        out = torch.cat([out[..., :-1] / (norm + 1e-8), out[..., -1:]], dim=-1)
+    def aggregate_neighbors(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        size: Optional[Tuple[int, int]] = None
+    ) -> torch.Tensor:
+        """Aggregate neighborhood features using projective operations."""
+        # Sample neighbors if specified
+        edge_index = self.sample_neighbors(edge_index, x.size(0))
+        row, col = edge_index
+        
+        # Get neighbor features
+        neigh_features = x[col]
+        
+        if self.aggregator == 'mean':
+            # Mean aggregation with cross-ratio weights
+            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
+            out[..., -1] = 1.0  # Set homogeneous coordinate
+            
+            # Compute weights using cross-ratios
+            weights = []
+            for i in range(len(row)):
+                src, dst = row[i], col[i]
+                weight = self.compute_cross_ratio_weight(x[src], x[dst])
+                weights.append(weight)
+            
+            weights = torch.tensor(weights, device=x.device)
+            weights = weights / weights.sum()
+            
+            # Weighted aggregation
+            for i, w in enumerate(weights):
+                out[row[i]] += w * self.projective_transform(neigh_features[i:i+1], self.W_neigh)[0]
+                
+        elif self.aggregator == 'max':
+            # Max aggregation in projective space
+            transformed = self.projective_transform(neigh_features, self.W_neigh)
+            
+            # Initialize output
+            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
+            out[..., -1] = 1.0
+            
+            # Max pooling for each node's neighbors
+            for node in range(x.size(0)):
+                mask = row == node
+                if mask.any():
+                    node_neighs = transformed[mask]
+                    # Max pooling in feature space
+                    max_feats = torch.max(node_neighs[..., :-1], dim=0)[0]
+                    # Add homogeneous coordinate back
+                    out[node] = torch.cat([max_feats, torch.ones(1, device=x.device)])
+                    
+        else:  # LSTM
+            # LSTM aggregation
+            transformed = self.projective_transform(neigh_features, self.W_neigh)
+            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
+            out[..., -1] = 1.0
+            
+            # Process each node's neighbors through LSTM
+            for node in range(x.size(0)):
+                mask = row == node
+                if mask.any():
+                    node_neighs = transformed[mask][..., :-1]  # Remove homogeneous coordinate
+                    node_neighs = node_neighs.unsqueeze(0)  # Add batch dimension
+                    lstm_out, _ = self.lstm(node_neighs)
+                    # Use last LSTM output
+                    out[node, :-1] = lstm_out[0, -1]
+                    
         return out
         
     def compute_cross_ratio_weight(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
@@ -79,53 +179,7 @@ class ProjectiveSAGEConv(nn.Module):
         
         # Map to [0, 1] range
         weight = (cos_sim + 1) / 2
-        
         return weight.clamp(0.1, 0.9)  # Prevent extreme values
-        
-    def aggregate_neighbors(
-        self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        size: Optional[Tuple[int, int]] = None
-    ) -> torch.Tensor:
-        """Aggregate neighborhood features using projective operations."""
-        row, col = edge_index
-        
-        # Initialize output in projective space
-        out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
-        out[..., -1] = 1.0  # Set homogeneous coordinate to 1
-        
-        # Add homogeneous coordinate if not present
-        if x.size(-1) == self.in_features:
-            x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
-        
-        # Transform all nodes first
-        all_nodes = self.projective_transform(x, self.W_neigh)
-        
-        # Create adjacency matrix with self-loops
-        N = x.size(0)
-        adj = torch.zeros(N, N, device=x.device)
-        adj[row, col] = 1
-        adj = adj + torch.eye(N, device=x.device)
-        
-        # Compute weights for all edges
-        for i in range(len(row)):
-            src, dst = row[i], col[i]
-            weight = self.compute_cross_ratio_weight(x[src], x[dst])
-            adj[src, dst] = weight
-            adj[dst, src] = weight
-            
-        # Normalize weights
-        adj = adj / (adj.sum(dim=1, keepdim=True) + 1e-8)
-        
-        # Aggregate features using normalized weights
-        out = torch.matmul(adj, all_nodes)
-        
-        # Ensure output lies in projective space
-        norm = torch.norm(out[..., :-1], p=2, dim=-1, keepdim=True)
-        out = torch.cat([out[..., :-1] / (norm + 1e-8), out[..., -1:]], dim=-1)
-        
-        return out
         
     def forward(
         self,
