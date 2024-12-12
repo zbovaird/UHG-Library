@@ -102,9 +102,9 @@ def create_knn_graph(data, k, batch_size=1000, console=None):
     
     # Progress bar for graph construction
     construction_progress = Progress(
-        SpinnerColumn(spinner_name="dots12", style="yellow"),
-        TextColumn("[bold yellow]Gjallarhorn under construction[/]"),
-        BarColumn(complete_style="yellow", finished_style="green"),
+        SpinnerColumn(spinner_name="dots12", style="cyan"),
+        TextColumn("[bold blue]Forging the Rings of Gjallarhorn[/]"),
+        BarColumn(complete_style="cyan", finished_style="green"),
         TimeElapsedColumn(),
         "|",
         TimeRemainingColumn(),
@@ -144,6 +144,14 @@ test_file = '/content/drive/MyDrive/modbus/test_data_balanced_new.csv'
 train_data = pd.read_csv(train_file)
 val_data = pd.read_csv(val_file)
 test_data = pd.read_csv(test_file)
+
+# Reduce dataset size
+data_percentage = 0.02  # Use 2% of data
+train_data = train_data.sample(frac=data_percentage, random_state=42)
+val_data = val_data.sample(frac=data_percentage, random_state=42)
+test_data = test_data.sample(frac=data_percentage, random_state=42)
+print(f"Data reduced to {data_percentage*100}%")
+print(f"New sizes - Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
 
 # Handle missing values and non-numeric columns
 print("Preprocessing data...")
@@ -353,47 +361,62 @@ class UHGModel(nn.Module):
 class UHGLoss(nn.Module):
     """UHG-compliant loss function optimized for anomaly detection."""
     
-    def __init__(self, spread_weight: float = 0.01, quad_weight: float = 0.5):
+    def __init__(self, spread_weight: float = 0.001, quad_weight: float = 0.1):
         super().__init__()
         self.spread_weight = spread_weight
         self.quad_weight = quad_weight
         
     def forward(self, z: torch.Tensor, edge_index: torch.Tensor, batch_size: int) -> torch.Tensor:
-        """Compute UHG-compliant loss."""
+        """Compute UHG-compliant loss with improved scaling."""
         mask = (edge_index[0] < batch_size) & (edge_index[1] < batch_size)
         pos_edge_index = edge_index[:, mask]
         
         if pos_edge_index.size(1) == 0:
             return torch.tensor(0.0, device=z.device)
             
-        pos_quad = torch.clamp(uhg_quadrance(z[pos_edge_index[0]], z[pos_edge_index[1]]), max=10.0)
+        # Compute base metrics
+        pos_quad = uhg_quadrance(z[pos_edge_index[0]], z[pos_edge_index[1]])
         
         neg_edge_index = torch.randint(0, batch_size, (2, batch_size), device=z.device)
-        neg_quad = torch.clamp(uhg_quadrance(z[neg_edge_index[0]], z[neg_edge_index[1]]), max=10.0)
+        neg_quad = uhg_quadrance(z[neg_edge_index[0]], z[neg_edge_index[1]])
         
-        spread = torch.clamp(uhg_spread(z[pos_edge_index[0]], z[pos_edge_index[1]]), max=10.0)
+        spread = uhg_spread(z[pos_edge_index[0]], z[pos_edge_index[1]])
         
-        pos_loss = torch.mean(pos_quad)
-        neg_loss = torch.mean(F.relu(1 - neg_quad))
-        spread_loss = self.spread_weight * spread.mean()
+        # Scale the metrics before combining
+        pos_loss = torch.mean(pos_quad) / batch_size
+        neg_loss = torch.mean(F.relu(1 - neg_quad)) / batch_size
+        spread_loss = spread.mean() / batch_size
         
-        total_loss = self.quad_weight * (pos_loss + neg_loss) + spread_loss
-        return torch.clamp(total_loss, min=0, max=1000.0)
+        # Apply weights and combine
+        quad_loss = self.quad_weight * (pos_loss + neg_loss)
+        spread_term = self.spread_weight * spread_loss
+        
+        # Compute total loss with log scaling to prevent explosion
+        total_loss = torch.log1p(quad_loss) + torch.log1p(spread_term)
+        
+        return total_loss  # Remove clamp to allow natural scaling
 
 if __name__ == "__main__":
-    # Initialize model with reduced complexity
-    print("Initializing model...")
+    # Optimal parameters (for current dataset)
+    spread_weight = 0.0001
+    quad_weight = 0.01
+    learning_rate = 0.001
+    batch_size = 128
+    num_epochs = 100
+    
+    # Track learning progress
+    epoch_losses = []
+    epoch_lrs = []
+    
+    # Initialize model
     model = UHGModel(
         in_channels=train_features.shape[1],
-        hidden_channels=32,  # Reduced from 64
-        out_channels=16,     # Reduced from 32
-        num_layers=2         # Reduced from 3
+        hidden_channels=32,
+        out_channels=16,
+        num_layers=2
     ).to(device)
-
-    # Optimizer with lower learning rate
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)  # Reduced from 0.001
     
-    # Learning rate scheduler
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
@@ -401,22 +424,16 @@ if __name__ == "__main__":
         patience=10,
         min_lr=1e-6
     )
-
-    criterion = UHGLoss(spread_weight=0.01, quad_weight=0.5)  # Updated weights
+    
+    criterion = UHGLoss(spread_weight=spread_weight, quad_weight=quad_weight)
     scaler = torch.cuda.amp.GradScaler()
-
-    # Training with smaller batch size
-    num_epochs = 100
-    batch_size = 256  # Reduced from 1024
-
-    print("Starting training...")
-    model.train()
-
-    # Progress bar for training
-    hunting_progress = Progress(
-        SpinnerColumn(spinner_name="arrow3", style="red"),
-        TextColumn("[bold red]Gjallarhorn is hunting[/]"),
-        BarColumn(complete_style="red", finished_style="green"),
+    
+    # Training progress
+    console = Console()
+    progress = Progress(
+        SpinnerColumn(spinner_name="dots12", style="blue"),
+        TextColumn("[bold blue]Training the echoes of Eternity[/]"),
+        BarColumn(complete_style="cyan", finished_style="green"),
         TimeElapsedColumn(),
         "|",
         TimeRemainingColumn(),
@@ -425,80 +442,118 @@ if __name__ == "__main__":
         console=console,
         expand=True
     )
-
+    
     best_loss = float('inf')
     patience_counter = 0
-
-    with hunting_progress:
-        hunt_task = hunting_progress.add_task("Training", total=num_epochs)
+    
+    with progress:
+        task = progress.add_task("Training", total=num_epochs)
         
         for epoch in range(num_epochs):
+            model.train()
             optimizer.zero_grad()
             
             with torch.cuda.amp.autocast():
                 out = model(train_features, train_edge_index)
                 loss = criterion(out, train_edge_index, batch_size)
+                
+                # Handle NaN loss
+                if torch.isnan(loss):
+                    console.print("[bold red]NaN loss detected! Skipping batch.[/]")
+                    loss = torch.tensor(1000.0, device=loss.device, requires_grad=True)
             
             scaler.scale(loss).backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # More aggressive gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)  # Reduced from 1.0
             
             scaler.step(optimizer)
             scaler.update()
             
-            # Learning rate scheduling
-            scheduler.step(loss)
             current_lr = optimizer.param_groups[0]['lr']
+            scheduler.step(loss)
             
-            hunting_progress.update(hunt_task, advance=1)
+            # Track metrics
+            epoch_losses.append(loss.item())
+            epoch_lrs.append(current_lr)
+            
+            progress.update(task, advance=1)
             
             if (epoch + 1) % 10 == 0:
                 console.print(
-                    f'[bold yellow]Epoch [{epoch+1}/{num_epochs}][/], '
+                    f'[bold blue]Epoch [{epoch+1}/{num_epochs}][/], '
                     f'[red]Loss: {loss.item():.4f}[/], '
                     f'[cyan]LR: {current_lr:.6f}[/]'
                 )
-                torch.cuda.empty_cache()
-
+            
             # Early stopping check
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter >= 20:  # Stop if no improvement for 20 epochs
-                    console.print("[yellow]Early stopping triggered![/]")
+                if patience_counter >= 50:  # Increased patience
+                    console.print("[bold red]Early stopping triggered![/]")
                     break
+            
+            torch.cuda.empty_cache()  # Clear GPU memory after each epoch
 
-    console.print("[bold green]Gjallarhorn's hunt is complete![/]")
-
-    # Generate embeddings
-    print("Generating embeddings...")
+    console.print("[bold green]Gjallarhorn has summoned the Gods![/]")
+    console.print(f"[bold blue]Best Loss: {best_loss:.4f}[/]")
+    
+    # Plot learning curves
+    plt.figure(figsize=(12, 5))
+    
+    # Loss curve
+    plt.subplot(1, 2, 1)
+    plt.plot(epoch_losses, 'b-', label='Training Loss')
+    plt.yscale('log')
+    plt.title('Learning Curve')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (log scale)')
+    plt.grid(True)
+    plt.legend()
+    
+    # Learning rate curve
+    plt.subplot(1, 2, 2)
+    plt.plot(epoch_lrs, 'r-', label='Learning Rate')
+    plt.yscale('log')
+    plt.title('Learning Rate Schedule')
+    plt.xlabel('Epoch')
+    plt.ylabel('Learning Rate (log scale)')
+    plt.grid(True)
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Generate embeddings using best model
+    print("\nGenerating embeddings with best model...")
+    model.load_state_dict(best_model)
     model.eval()
     with torch.no_grad():
         train_embeddings = model(train_features, train_edge_index).cpu().numpy()
-        val_embeddings = model(val_features, val_edge_index).cpu().numpy()  # Use val_edge_index
-        test_embeddings = model(test_features, test_edge_index).cpu().numpy()  # Use test_edge_index
-
+        val_embeddings = model(val_features, val_edge_index).cpu().numpy()
+        test_embeddings = model(test_features, test_edge_index).cpu().numpy()
+    
     # Save embeddings
     np.save('/content/drive/MyDrive/modbus/train_embeddings.npy', train_embeddings)
     np.save('/content/drive/MyDrive/modbus/val_embeddings.npy', val_embeddings)
     np.save('/content/drive/MyDrive/modbus/test_embeddings.npy', test_embeddings)
-
+    
     print("Embeddings saved to Google Drive!")
-
+    
     # Visualization
     from sklearn.manifold import TSNE
     import matplotlib.pyplot as plt
-
+    
     print("Creating t-SNE visualization...")
     tsne = TSNE(n_components=2, random_state=42)
     train_tsne = tsne.fit_transform(train_embeddings)
-
+    
     plt.figure(figsize=(10, 8))
     plt.scatter(train_tsne[:, 0], train_tsne[:, 1], alpha=0.5)
-    plt.title('t-SNE visualization of UHG embeddings')
+    plt.title('t-SNE visualization of UHG embeddings (Best Model)')
     plt.xlabel('t-SNE 1')
     plt.ylabel('t-SNE 2')
     plt.show()
