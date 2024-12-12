@@ -60,15 +60,16 @@ def test_dimensions():
     
     # Initialize model with correct dimensions
     model = UHGModel(
-        in_features=features.shape[1],  # 5 (4 features + 1 homogeneous)
-        hidden_features=8,  # Smaller for testing
-        out_features=4     # Smaller for testing
+        in_channels=features.shape[1],  # 5 (4 features + 1 homogeneous)
+        hidden_channels=8,
+        out_channels=4,
+        num_layers=2
     ).to(device)
     
     # Test forward pass
     try:
         out = model(features, edge_index)
-        print(f"Output shape: {out.shape}")  # Should be [100, 4]
+        print(f"Output shape: {out.shape}")  # Should be [100, 5] (4 features + 1 homogeneous)
         print("✓ Forward pass successful")
     except Exception as e:
         print(f"✗ Forward pass failed: {str(e)}")
@@ -88,15 +89,15 @@ def test_uhg_compliance():
     
     # Initialize model with correct dimensions
     model = UHGModel(
-        in_features=features.shape[1],  # 5 (4 features + 1 homogeneous)
-        hidden_features=6,              # Smaller for testing
-        out_features=4                  # Smaller for testing
+        in_channels=features.shape[1],  # 5 (4 features + 1 homogeneous)
+        hidden_channels=8,
+        out_channels=4,
+        num_layers=2
     ).to(device)
     
     # Test cross-ratio preservation through model
     with torch.no_grad():
         out = model(features, edge_index)
-        out = torch.cat([out, torch.ones_like(out[..., :1])], dim=-1)  # Add homogeneous coordinate for cross-ratio
         
         # Check random quadruples
         preserved = 0
@@ -127,9 +128,10 @@ def test_training():
     
     # Initialize model with correct dimensions
     model = UHGModel(
-        in_features=features.shape[1],  # 5 (4 features + 1 homogeneous)
-        hidden_features=8,              # Smaller for testing
-        out_features=3                  # Output dimension must match loss function
+        in_channels=features.shape[1],  # 5 (4 features + 1 homogeneous)
+        hidden_channels=8,
+        out_channels=4,
+        num_layers=2
     ).to(device)
     
     # Initialize optimizer and loss
@@ -146,9 +148,7 @@ def test_training():
         for epoch in range(5):  # Just a few epochs for testing
             optimizer.zero_grad()
             out = model(features, edge_index)
-            # Remove homogeneous coordinate for loss computation
-            out_features = out[..., :-1]
-            loss = criterion(out_features, edge_index, batch_size=32)
+            loss = criterion(out, edge_index, batch_size=32)
             loss.backward()
             optimizer.step()
             print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
