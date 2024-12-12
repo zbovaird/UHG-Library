@@ -9,6 +9,14 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
+from rich.console import Console
+from rich.theme import Theme
+
 def check_install_packages():
     """Check and install required packages with specific versions to avoid conflicts."""
     try:
@@ -244,6 +252,38 @@ def uhg_spread(L: torch.Tensor, M: torch.Tensor, eps: float = 1e-9) -> torch.Ten
     spread = 1 - (dot_product ** 2) / denom
     return spread
 
+def uhg_relu(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """UHG-compliant ReLU that preserves projective structure.
+    
+    Args:
+        x: Input tensor with shape [..., D+1] where last dim is homogeneous coordinate
+        eps: Small value for numerical stability
+        
+    Returns:
+        Activated tensor preserving UHG structure
+    """
+    # Split features and homogeneous coordinate
+    features = x[..., :-1]
+    h_coord = x[..., -1:]
+    
+    # Apply ReLU to features only
+    activated_features = F.relu(features)
+    
+    # Concatenate back with homogeneous coordinate
+    out = torch.cat([activated_features, h_coord], dim=-1)
+    
+    # Normalize to maintain projective structure
+    norm = torch.norm(out[..., :-1], p=2, dim=-1, keepdim=True)
+    norm = torch.clamp(norm, min=eps)
+    
+    # Scale features while preserving homogeneous coordinate
+    out = torch.cat([
+        out[..., :-1] / norm,
+        out[..., -1:] / torch.abs(out[..., -1:]).clamp(min=eps)
+    ], dim=-1)
+    
+    return out
+
 class ProjectiveBaseLayer(nn.Module):
     """Base layer for UHG-compliant neural network operations."""
     
@@ -354,8 +394,10 @@ class UHGModel(nn.Module):
         
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Forward pass through the model."""
-        for conv in self.convs:
+        for conv in self.convs[:-1]:
             x = conv(x, edge_index)
+            x = uhg_relu(x)  # Replace F.relu with UHG-compliant version
+        x = self.convs[-1](x, edge_index)
         return x
 
 class UHGLoss(nn.Module):
@@ -557,3 +599,50 @@ if __name__ == "__main__":
     plt.xlabel('t-SNE 1')
     plt.ylabel('t-SNE 2')
     plt.show()
+
+# Create console with custom theme
+console = Console(theme=Theme({
+    "info": "cyan",
+    "warning": "yellow",
+    "danger": "red",
+    "success": "green"
+}))
+
+def create_graph_structures(train_data, val_data, test_data):
+    # Print the main title
+    console.print("\n[bold cyan]Forging the Rings of Gjallarhorn[/]\n")
+    
+    # Create progress bars with different positions
+    progress = Progress(
+        SpinnerColumn(spinner_name="dots12"),
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(complete_style="cyan", finished_style="cyan"),
+        TimeElapsedColumn(),
+        "|",
+        TimeRemainingColumn(),
+        "|",
+        MofNCompleteColumn()
+    )
+    
+    with progress:
+        # Add tasks for each dataset
+        train_task = progress.add_task("[cyan]Forging Training Rings    ", total=1)
+        val_task = progress.add_task("[cyan]Forging Validation Rings  ", total=1)
+        test_task = progress.add_task("[cyan]Forging Test Rings       ", total=1)
+        
+        # Create training graph
+        train_graph = create_knn_graph(train_data)
+        progress.update(train_task, advance=1)
+        
+        # Create validation graph
+        val_graph = create_knn_graph(val_data)
+        progress.update(val_task, advance=1)
+        
+        # Create test graph
+        test_graph = create_knn_graph(test_data)
+        progress.update(test_task, advance=1)
+    
+    # Print completion message
+    console.print("\n[bold green]The Rings of Gjallarhorn are Forged and Unbroken[/]\n")
+    
+    return train_graph, val_graph, test_graph
