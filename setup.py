@@ -67,5 +67,5 @@ setup(
     ],
     python_requires=">=3.8",
     zip_safe=False,  # Required for mypy to find type hints
-    version="0.2.6",
+    version="0.3.0",
 ) 

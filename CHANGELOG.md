@@ -37,4 +37,20 @@ All notable changes to this project will be documented in this file.
 - Initial release
 - Core UHG operations
 - Basic feature extraction
-- Anomaly detection 
+- Anomaly detection
+
+## [0.3.0] - 2024-03-19
+
+### Added
+- New UHG-compliant functional operations in `uhg.nn.functional`
+- Specialized loss functions in `uhg.nn.losses` including UHGLoss and UHGAnomalyLoss
+- Comprehensive metrics module in `uhg.utils.metrics` for geometric evaluations
+- Detailed IMPLEMENTATION.md guide with best practices and examples
+- Enhanced cross-ratio preservation checks and stability improvements
+- Better numerical stability in geometric operations
+- Improved error handling and validation
+
+### Changed
+- Optimized UHG operations for better performance
+- Enhanced documentation with practical examples
+- Improved type hints and error messages
