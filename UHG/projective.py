@@ -18,431 +18,208 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple, Union
+from torch import Tensor
 
 class ProjectiveUHG:
-    """Universal Hyperbolic Geometry operations using projective geometry.
-    
-    All operations are performed using pure projective geometry,
-    without any manifold concepts or tangent space mappings.
     """
-    def __init__(self):
-        pass
-        
-    def get_projective_matrix(self, dim: int) -> torch.Tensor:
-        """Get a random projective transformation matrix.
+    Universal Hyperbolic Geometry operations in projective space.
+    All operations follow the mathematical definitions from UHG.pdf.
+    """
+    
+    def __init__(self, epsilon: float = 1e-10):
+        self.epsilon = epsilon
+    
+    def wedge(self, a: Tensor, b: Tensor) -> Tensor:
+        """
+        Compute the wedge product between two vectors.
+        a∧b = a₁b₂ - a₂b₁ for 2D projective space
         
         Args:
-            dim: Dimension of the projective space
+            a: First vector tensor of shape (..., 3)
+            b: Second vector tensor of shape (..., 3)
             
         Returns:
-            Projective transformation matrix
+            Wedge product tensor of shape (...)
         """
-        # Create random matrix
-        matrix = torch.randn(dim + 1, dim + 1)
-        
-        # Make it orthogonal (preserves cross-ratios)
-        q, r = torch.linalg.qr(matrix)
-        
-        # Ensure determinant is positive
-        if torch.det(q) < 0:
-            q = -q
+        if a.shape[-1] != 3 or b.shape[-1] != 3:
+            raise ValueError("Input tensors must have shape (..., 3)")
             
-        return q
+        # Compute wedge product components
+        w12 = a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+        w23 = a[..., 1] * b[..., 2] - a[..., 2] * b[..., 1]
+        w31 = a[..., 2] * b[..., 0] - a[..., 0] * b[..., 2]
         
-    def transform(self, points: torch.Tensor, matrix: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Apply projective transformation to points.
+        return torch.stack([w23, w31, w12], dim=-1)
+    
+    def quadrance(self, a: Tensor, b: Tensor) -> Tensor:
+        """
+        Compute quadrance between two points in projective space.
+        q(a1,a2) = 1 - (x₁x₂ + y₁y₂ - z₁z₂)² / ((x₁² + y₁² - z₁²)(x₂² + y₂² - z₂²))
         
         Args:
-            points: Points to transform [B, N, D+1] or [N, D+1]
-            matrix: Optional transformation matrix [D+1, D+1]
+            a: First point [x₁:y₁:z₁]
+            b: Second point [x₂:y₂:z₂]
             
         Returns:
-            Transformed points [B, N, D+1] or [N, D+1]
+            Quadrance between points
+            
+        Notes:
+            - Undefined if either point is null (x² + y² - z² = 0)
+            - Equal to 1 when points are perpendicular
+            - Equal to 0 when points are same or form a null line
+            - For hyperbolic points, norms should be negative
         """
-        # Handle unbatched input
-        if points.dim() == 2:
-            points = points.unsqueeze(0)  # [N, D+1] -> [1, N, D+1]
+        if a.shape[-1] != 3 or b.shape[-1] != 3:
+            raise ValueError("Input tensors must have shape (..., 3)")
             
-        # Default to identity if no matrix provided
-        if matrix is None:
-            matrix = torch.eye(points.shape[-1], device=points.device)
-            
-        # Ensure matrix has correct dimensions
-        if points.shape[-1] != matrix.shape[-1]:
-            # Add row and column for homogeneous coordinate
-            pad_size = points.shape[-1] - matrix.shape[-1]
-            if pad_size > 0:
-                pad = torch.zeros(matrix.shape[0] + pad_size, matrix.shape[1] + pad_size, device=points.device)
-                pad[:matrix.shape[0], :matrix.shape[1]] = matrix
-                pad[-1, -1] = 1.0
-                matrix = pad
-            else:
-                # Truncate matrix if needed
-                matrix = matrix[:points.shape[-1], :points.shape[-1]]
-            
-        # Store original cross-ratio if enough points
-        has_cr = points.size(1) >= 4
-        if has_cr:
-            cr_before = self.cross_ratio(points[:, 0], points[:, 1], points[:, 2], points[:, 3])
-            
-        # Apply transformation
-        transformed = torch.matmul(points, matrix.t())
+        # Check for null points first
+        norm_a = a[..., 0]**2 + a[..., 1]**2 - a[..., 2]**2
+        norm_b = b[..., 0]**2 + b[..., 1]**2 - b[..., 2]**2
         
-        # Normalize features
-        features = transformed[..., :-1]  # [B, N, D]
-        homogeneous = transformed[..., -1:]  # [B, N, 1]
-        norm = torch.norm(features, p=2, dim=-1, keepdim=True)
-        features = features / (norm + 1e-8)
-        transformed = torch.cat([features, homogeneous], dim=-1)
-        
-        # Restore cross-ratio if needed
-        if has_cr:
-            cr_after = self.cross_ratio(transformed[:, 0], transformed[:, 1], transformed[:, 2], transformed[:, 3])
-            valid_cr = ~torch.isnan(cr_after) & ~torch.isnan(cr_before) & (cr_after != 0)
-            if valid_cr.any():
-                # Compute scale factor in log space for better numerical stability
-                log_scale = 0.5 * (torch.log(cr_before[valid_cr] + 1e-8) - torch.log(cr_after[valid_cr] + 1e-8))
-                scale = torch.exp(log_scale)
-                
-                # Apply scale to features
-                features = transformed[..., :-1]
-                features = features * scale.view(-1, 1, 1)
-                
-                # Re-normalize features
-                norm = torch.norm(features, p=2, dim=-1, keepdim=True)
-                features = features / (norm + 1e-8)
-                transformed = torch.cat([features, transformed[..., -1:]], dim=-1)
-                
-        # Remove batch dimension if input was unbatched
-        if points.size(0) == 1:
-            transformed = transformed.squeeze(0)
+        # Points should be non-null and have negative norms for hyperbolic space
+        if torch.any(torch.abs(norm_a) < self.epsilon) or torch.any(torch.abs(norm_b) < self.epsilon):
+            raise ValueError("Quadrance is undefined for null points")
             
-        return transformed
+        if torch.any(norm_a > -self.epsilon) or torch.any(norm_b > -self.epsilon):
+            raise ValueError("Points must have negative norms in hyperbolic space")
         
-    def normalize_points(self, points: torch.Tensor) -> torch.Tensor:
-        """Normalize points to lie in projective space.
+        # Compute inner product exactly as in formula
+        inner_prod = a[..., 0]*b[..., 0] + a[..., 1]*b[..., 1] - a[..., 2]*b[..., 2]
         
-        Args:
-            points: Points to normalize
-            
-        Returns:
-            Normalized points
+        # For hyperbolic points with negative norms, we don't need absolute values
+        # The denominator will be positive because it's the product of two negative norms
+        return 1.0 - (inner_prod**2) / (norm_a * norm_b)
+    
+    def spread(self, l1: Tensor, l2: Tensor) -> Tensor:
         """
-        norm = torch.norm(points, p=2, dim=-1, keepdim=True)
-        return points / (norm + 1e-8)
-        
-    def join(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
-        """Join two points to create a line.
-        
-        Args:
-            p1: First point
-            p2: Second point
-            
-        Returns:
-            Line through the points
+        Compute spread between two lines in projective space.
+        S(l,m) = (l₁m₁ + l₂m₂ - l₃m₃)² / ((l₁² + l₂² - l₃²)(m₁² + m₂² - m₃²))
         """
-        # Extract 3D coordinates for cross product
-        p1_3d = p1[..., :3]
-        p2_3d = p2[..., :3]
-        
-        # Use cross product to get line coefficients
-        line = torch.linalg.cross(p1_3d, p2_3d, dim=-1)
-        
-        # Add homogeneous coordinate
-        if p1.size(-1) > 3:
-            line = torch.cat([line, torch.ones_like(line[..., :1])], dim=-1)
+        if l1.shape[-1] != 3 or l2.shape[-1] != 3:
+            raise ValueError("Input tensors must have shape (..., 3)")
             
-        return self.normalize_points(line)
+        # Normalize inputs for numerical stability
+        l1 = l1 / (torch.norm(l1, dim=-1, keepdim=True) + self.epsilon)
+        l2 = l2 / (torch.norm(l2, dim=-1, keepdim=True) + self.epsilon)
         
-    def meet(self, l1: torch.Tensor, l2: torch.Tensor) -> torch.Tensor:
-        """Meet two lines to get their intersection point.
+        # Split coordinates
+        l1_xy = l1[..., :2]
+        l1_z = l1[..., 2]
+        l2_xy = l2[..., :2]
+        l2_z = l2[..., 2]
         
-        Args:
-            l1: First line
-            l2: Second line
-            
-        Returns:
-            Intersection point
+        # Compute numerator using hyperbolic inner product
+        dot_xy = torch.sum(l1_xy * l2_xy, dim=-1)
+        numerator = (dot_xy - l1_z * l2_z) ** 2
+        
+        # Compute denominators using hyperbolic norm
+        denom_l1 = torch.clamp(torch.sum(l1_xy * l1_xy, dim=-1) - l1_z * l1_z, min=self.epsilon)
+        denom_l2 = torch.clamp(torch.sum(l2_xy * l2_xy, dim=-1) - l2_z * l2_z, min=self.epsilon)
+        denominator = denom_l1 * denom_l2
+        
+        # Compute spread with proper scaling
+        s = numerator / denominator
+        return 1.0 - torch.clamp(s, min=0.0, max=1.0)
+    
+    def cross_ratio(self, v1: Tensor, v2: Tensor, u1: Tensor, u2: Tensor) -> Tensor:
         """
-        # Extract 3D coordinates for cross product
-        l1_3d = l1[..., :3]
-        l2_3d = l2[..., :3]
-        
-        # Use cross product to get intersection point
-        point = torch.linalg.cross(l1_3d, l2_3d, dim=-1)
-        
-        # Add homogeneous coordinate
-        if l1.size(-1) > 3:
-            point = torch.cat([point, torch.ones_like(point[..., :1])], dim=-1)
-            
-        return self.normalize_points(point)
-        
-    def get_ideal_points(self, line: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get the ideal points on a line.
-        
-        These are the points where the line intersects the absolute conic.
-        
-        Args:
-            line: Line to find ideal points on
-            
-        Returns:
-            Tuple of two ideal points
+        Compute cross-ratio of four vectors in projective space.
+        CR(v₁,v₂;u₁,u₂) = (z₁w₂)/(w₁z₂) where u₁ = z₁v₁ + w₁v₂, u₂ = z₂v₁ + w₂v₂
         """
-        # Get coefficients of line
-        a, b, c = line[..., :3].unbind(-1)
-        
-        # Solve quadratic equation ax^2 + by^2 + c = 0
-        discriminant = torch.sqrt(b**2 - 4*a*c + 1e-8)
-        x1 = (-b + discriminant) / (2*a + 1e-8)
-        x2 = (-b - discriminant) / (2*a + 1e-8)
-        
-        # Create homogeneous coordinates
-        p1 = torch.stack([x1, torch.ones_like(x1), torch.zeros_like(x1)], dim=-1)
-        p2 = torch.stack([x2, torch.ones_like(x2), torch.zeros_like(x2)], dim=-1)
-        
-        # Add homogeneous coordinate if needed
-        if line.size(-1) > 3:
-            p1 = torch.cat([p1, torch.ones_like(p1[..., :1])], dim=-1)
-            p2 = torch.cat([p2, torch.ones_like(p2[..., :1])], dim=-1)
+        if not all(t.shape[-1] == 3 for t in [v1, v2, u1, u2]):
+            raise ValueError("All input tensors must have shape (..., 3)")
             
-        return self.normalize_points(p1), self.normalize_points(p2)
-        
-    def cross_ratio(self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor) -> torch.Tensor:
-        """Compute the cross-ratio of four points.
-        
-        Args:
-            p1: First point
-            p2: Second point
-            p3: Third point
-            p4: Fourth point
+        # Normalize inputs for numerical stability
+        v1 = v1 / (torch.norm(v1, dim=-1, keepdim=True) + self.epsilon)
+        v2 = v2 / (torch.norm(v2, dim=-1, keepdim=True) + self.epsilon)
+        u1 = u1 / (torch.norm(u1, dim=-1, keepdim=True) + self.epsilon)
+        u2 = u2 / (torch.norm(u2, dim=-1, keepdim=True) + self.epsilon)
             
-        Returns:
-            Cross-ratio value
+        # Create matrices for solving systems
+        A = torch.stack([v1, v2], dim=-1)  # Shape: (..., 3, 2)
+        b1 = u1.unsqueeze(-1)  # Shape: (..., 3, 1)
+        b2 = u2.unsqueeze(-1)  # Shape: (..., 3, 1)
+        
+        # Solve using updated linalg.solve
+        ATA = torch.matmul(A.transpose(-2, -1), A)
+        ATb1 = torch.matmul(A.transpose(-2, -1), b1)
+        ATb2 = torch.matmul(A.transpose(-2, -1), b2)
+        
+        # Add regularization for stability
+        reg = self.epsilon * torch.eye(2, device=ATA.device).expand_as(ATA)
+        ATA = ATA + reg
+        
+        # Solve systems using updated torch.linalg.solve
+        coeff1 = torch.linalg.solve(ATA, ATb1)
+        coeff2 = torch.linalg.solve(ATA, ATb2)
+        
+        z1, w1 = coeff1[..., 0, 0], coeff1[..., 1, 0]
+        z2, w2 = coeff2[..., 0, 0], coeff2[..., 1, 0]
+        
+        # Compute cross-ratio with stabilization
+        numerator = z1 * w2
+        denominator = (w1 * z2).clamp(min=self.epsilon)
+        
+        # Normalize the result to handle large values
+        result = numerator / denominator
+        scale = torch.max(torch.abs(result))
+        if scale > 1.0:
+            result = result / scale
+        
+        return result
+    
+    def opposite_points(self, a1: Tensor, a2: Tensor) -> Tuple[Tensor, Tensor]:
         """
-        # Compute distances using dot products
-        d12 = torch.sum(p1 * p2, dim=-1)
-        d34 = torch.sum(p3 * p4, dim=-1)
-        d13 = torch.sum(p1 * p3, dim=-1)
-        d24 = torch.sum(p2 * p4, dim=-1)
-        
-        # Compute cross-ratio
-        return (d12 * d34) / (d13 * d24 + 1e-8)
-        
-    def projective_average(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        """Compute weighted average of points in projective space.
-        
-        Args:
-            points: Points to average [B, N, D+1] or [N, D+1]
-            weights: Weights for averaging [N]
-            
-        Returns:
-            Averaged point [B, D+1] or [D+1]
+        Compute opposite points for two points in projective space.
+        Returns o₁, o₂ where:
+        o₁ = (a₁·a₂)a₁ - (a₁·a₁)a₂
+        o₂ = (a₁·a₂)a₁ - (a₁·a₂)a₂
         """
-        # Handle unbatched input
-        if points.dim() == 2:
-            points = points.unsqueeze(0)  # [N, D+1] -> [1, N, D+1]
+        if a1.shape[-1] != 3 or a2.shape[-1] != 3:
+            raise ValueError("Input tensors must have shape (..., 3)")
             
-        # Extract features and homogeneous coordinates
-        features = points[..., :-1]  # [B, N, D]
-        homogeneous = points[..., -1:]  # [B, N, 1]
+        # Normalize inputs for numerical stability
+        a1 = a1 / (torch.norm(a1, dim=-1, keepdim=True) + self.epsilon)
+        a2 = a2 / (torch.norm(a2, dim=-1, keepdim=True) + self.epsilon)
         
-        # Reshape weights for broadcasting
-        weights = weights.view(1, -1, 1)  # [N] -> [1, N, 1]
+        # Split coordinates
+        a1_xy = a1[..., :2]
+        a1_z = a1[..., 2]
+        a2_xy = a2[..., :2]
+        a2_z = a2[..., 2]
         
-        # Apply weights
-        weighted_features = torch.sum(features * weights, dim=1)  # [B, D]
-        weighted_homogeneous = torch.sum(homogeneous * weights, dim=1)  # [B, 1]
+        # Compute dot products with stabilization
+        dot_12 = torch.sum(a1_xy * a2_xy, dim=-1, keepdim=True) - a1_z.unsqueeze(-1) * a2_z.unsqueeze(-1)
+        dot_11 = torch.sum(a1_xy * a1_xy, dim=-1, keepdim=True) - a1_z.unsqueeze(-1) * a1_z.unsqueeze(-1)
+        dot_22 = torch.sum(a2_xy * a2_xy, dim=-1, keepdim=True) - a2_z.unsqueeze(-1) * a2_z.unsqueeze(-1)
         
-        # Normalize features
-        norm = torch.norm(weighted_features, p=2, dim=-1, keepdim=True)
-        weighted_features = weighted_features / (norm + 1e-8)
+        # Compute opposite points
+        o1 = dot_12 * a1 - dot_11 * a2
+        o2 = dot_22 * a1 - dot_12 * a2
         
-        # Combine features and homogeneous coordinates
-        out = torch.cat([weighted_features, weighted_homogeneous], dim=-1)  # [B, D+1]
+        # Normalize outputs
+        o1 = o1 / (torch.norm(o1, dim=-1, keepdim=True) + self.epsilon)
+        o2 = o2 / (torch.norm(o2, dim=-1, keepdim=True) + self.epsilon)
         
-        # Remove batch dimension if input was unbatched
-        if points.size(0) == 1:
-            out = out.squeeze(0)  # [1, D+1] -> [D+1]
-            
-        return out
-        
-    def absolute_polar(self, line: torch.Tensor) -> torch.Tensor:
-        """Get the polar of a line with respect to the absolute conic.
-        
-        Args:
-            line: Line to find polar of
-            
-        Returns:
-            Polar point
+        return o1, o2
+    
+    def normalize(self, x: Tensor, dim: int = -1) -> Tensor:
         """
-        # For the absolute conic x^2 + y^2 = z^2, the polar is simple
-        return self.normalize_points(line)
-        
-    def normalize(self, points: torch.Tensor) -> torch.Tensor:
-        """Normalize points to lie on the unit sphere while preserving cross-ratios.
-        
-        Args:
-            points: Points to normalize [N, D] or [B, N, D]
-            
-        Returns:
-            Normalized points with same shape
+        Normalize vectors to lie in projective space.
+        Handles both 2D->3D projection and normalization.
         """
-        # Handle unbatched input
-        if points.dim() == 2:
-            points = points.unsqueeze(0)  # [N, D] -> [1, N, D]
+        if x.shape[dim] not in [2, 3]:
+            raise ValueError("Input tensor must have 2 or 3 components in normalization dimension")
             
-        # Store original cross-ratio if enough points
-        has_cr = points.size(1) > 3
-        if has_cr:
-            cr_before = self.cross_ratio(points[:, 0], points[:, 1], points[:, 2], points[:, 3])
+        # Project 2D points to 3D if necessary
+        if x.shape[dim] == 2:
+            # Add third coordinate as 1
+            shape = list(x.shape)
+            shape[dim] = 1
+            ones = torch.ones(shape, device=x.device, dtype=x.dtype)
+            x = torch.cat([x, ones], dim=dim)
             
-        # Compute norms
-        norms = torch.norm(points, p=2, dim=-1, keepdim=True)
+        # Compute normalization factor with stabilization
+        norm = torch.sqrt(torch.sum(x * x, dim=dim, keepdim=True) + self.epsilon)
         
-        # Normalize points
-        normalized = points / (norms + 1e-8)
-        
-        # Restore cross-ratio if needed
-        if has_cr:
-            cr_after = self.cross_ratio(normalized[:, 0], normalized[:, 1], normalized[:, 2], normalized[:, 3])
-            valid_cr = ~torch.isnan(cr_after) & ~torch.isnan(cr_before) & (cr_after != 0)
-            if valid_cr.any():
-                # Compute scale factor in log space for better numerical stability
-                log_scale = 0.5 * (torch.log(cr_before[valid_cr] + 1e-8) - torch.log(cr_after[valid_cr] + 1e-8))
-                scale = torch.exp(log_scale)
-                
-                # Apply scale while preserving unit norm
-                scaled = normalized * scale.view(-1, 1, 1)
-                norms = torch.norm(scaled, p=2, dim=-1, keepdim=True)
-                normalized = scaled / (norms + 1e-8)
-                
-        # Remove batch dimension if input was unbatched
-        if points.size(0) == 1:
-            normalized = normalized.squeeze(0)
-            
-        return normalized
-        
-    def distance(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
-        """Compute projective distance between two points.
-        
-        Args:
-            p1, p2: Points in projective space
-            
-        Returns:
-            Distance value
-        """
-        # Extract features (ignore homogeneous coordinate)
-        p1_feat = p1[:-1]
-        p2_feat = p2[:-1]
-        
-        # Normalize features
-        p1_feat = p1_feat / (torch.norm(p1_feat, p=2) + 1e-8)
-        p2_feat = p2_feat / (torch.norm(p2_feat, p=2) + 1e-8)
-        
-        # Compute distance using cosine similarity
-        cos_sim = torch.sum(p1_feat * p2_feat)
-        # Map from [-1, 1] to [0, 2] for better numerical stability
-        return torch.sqrt(2 * (1 - cos_sim.clamp(-1 + 1e-8, 1 - 1e-8)))
-        
-    def cross_ratio(self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor) -> torch.Tensor:
-        """Compute cross-ratio of four points.
-        
-        Args:
-            p1, p2, p3, p4: Points in projective space
-            
-        Returns:
-            Cross-ratio value
-        """
-        # Extract features (ignore homogeneous coordinate)
-        p1_feat = p1[:-1]
-        p2_feat = p2[:-1]
-        p3_feat = p3[:-1]
-        p4_feat = p4[:-1]
-        
-        # Normalize features
-        p1_feat = p1_feat / (torch.norm(p1_feat, p=2) + 1e-8)
-        p2_feat = p2_feat / (torch.norm(p2_feat, p=2) + 1e-8)
-        p3_feat = p3_feat / (torch.norm(p3_feat, p=2) + 1e-8)
-        p4_feat = p4_feat / (torch.norm(p4_feat, p=2) + 1e-8)
-        
-        # Compute distances
-        d13 = torch.norm(p1_feat - p3_feat, p=2)
-        d24 = torch.norm(p2_feat - p4_feat, p=2)
-        d14 = torch.norm(p1_feat - p4_feat, p=2)
-        d23 = torch.norm(p2_feat - p3_feat, p=2)
-        
-        # Add small epsilon to prevent division by zero
-        eps = 1e-8
-        
-        # Compute cross-ratio with numerical stability
-        # Use log-space computation to prevent overflow/underflow
-        log_cr = torch.log(d13 + eps) + torch.log(d24 + eps) - torch.log(d14 + eps) - torch.log(d23 + eps)
-        cr = torch.exp(log_cr)
-        
-        return cr
-        
-    def scale(self, points: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-        """Scale points while preserving projective structure.
-        
-        Args:
-            points: Points to scale
-            scale: Scale factor
-            
-        Returns:
-            Scaled points
-        """
-        # Store original cross-ratio if enough points
-        has_cr = points.size(0) > 3
-        if has_cr:
-            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
-            
-        # Extract features and homogeneous coordinate
-        features = points[..., :-1]
-        homogeneous = points[..., -1:]
-        
-        # Apply scale to features
-        scaled_features = features * scale
-        
-        # Normalize features
-        norm = torch.norm(scaled_features, p=2, dim=-1, keepdim=True)
-        scaled_features = scaled_features / (norm + 1e-8)
-        scaled = torch.cat([scaled_features, homogeneous], dim=-1)
-        
-        # Restore cross-ratio if needed
-        if has_cr:
-            cr_after = self.cross_ratio(scaled[0], scaled[1], scaled[2], scaled[3])
-            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
-                scale = torch.sqrt(torch.abs(cr_before / cr_after))
-                features = scaled[..., :-1] * scale
-                # Re-normalize after scaling
-                norm = torch.norm(features, p=2, dim=-1, keepdim=True)
-                features = features / (norm + 1e-8)
-                scaled = torch.cat([features, scaled[..., -1:]], dim=-1)
-                
-        return scaled
-        
-    def aggregate(self, points: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        """Aggregate points using weighted average.
-        
-        Args:
-            points: Points to aggregate
-            weights: Aggregation weights
-            
-        Returns:
-            Aggregated points
-        """
-        # Store original cross-ratio if enough points
-        has_cr = points.size(0) > 3
-        if has_cr:
-            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
-            
-        # Apply weights
-        weighted = torch.matmul(weights, points)
-        
-        # Normalize features
-        features = weighted[..., :-1]
-        homogeneous = weighted[..., -1:]
-        norm = torch.norm(features, p=2, dim=-1, keepdim=True)
-        features = features / (norm + 1e-8)
-        
-        return torch.cat([features, homogeneous], dim=-1)
+        return x / norm
