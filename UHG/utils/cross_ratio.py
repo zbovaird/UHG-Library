@@ -7,7 +7,8 @@ def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4
     """Compute cross-ratio of four points in projective space.
     
     The cross-ratio is a projective invariant defined as:
-    CR(p1, p2, p3, p4) = |p1 - p3| |p2 - p4| / (|p1 - p4| |p2 - p3|)
+    CR(A,B;C,D) = (AC)(BD)/((AD)(BC))
+    where (XY) represents the hyperbolic dot product of points X and Y
     
     Args:
         p1, p2, p3, p4: Points in projective space with homogeneous coordinates
@@ -15,25 +16,28 @@ def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4
     Returns:
         Cross-ratio value
     """
-    # Extract features and homogeneous coordinates
-    p1_features = p1[..., :-1]
-    p2_features = p2[..., :-1]
-    p3_features = p3[..., :-1]
-    p4_features = p4[..., :-1]
+    # Compute hyperbolic dot products
+    def hyperbolic_dot(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # Split into spatial and time components
+        x_spatial = x[..., :-1]
+        x_time = x[..., -1]
+        y_spatial = y[..., :-1]
+        y_time = y[..., -1]
+        
+        # Compute dot product with Minkowski metric
+        return torch.sum(x_spatial * y_spatial, dim=-1) - x_time * y_time
     
-    # Compute distances in feature space
-    d13 = torch.norm(p1_features - p3_features, p=2, dim=-1)
-    d24 = torch.norm(p2_features - p4_features, p=2, dim=-1)
-    d14 = torch.norm(p1_features - p4_features, p=2, dim=-1)
-    d23 = torch.norm(p2_features - p3_features, p=2, dim=-1)
+    # Compute cross-ratio using hyperbolic dot products
+    AC = hyperbolic_dot(p1, p3)
+    BD = hyperbolic_dot(p2, p4)
+    AD = hyperbolic_dot(p1, p4)
+    BC = hyperbolic_dot(p2, p3)
     
     # Add small epsilon to prevent division by zero
     eps = 1e-8
     
-    # Compute cross-ratio in log space for better numerical stability
-    log_cr = torch.log(d13 + eps) + torch.log(d24 + eps) - torch.log(d14 + eps) - torch.log(d23 + eps)
-    
-    return torch.exp(log_cr)
+    # Compute cross-ratio
+    return (AC * BD) / (AD * BC + eps)
 
 def verify_cross_ratio_preservation(
     points_before: torch.Tensor,

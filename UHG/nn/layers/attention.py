@@ -5,6 +5,101 @@ from typing import Optional, Union, Tuple
 from .base import ProjectiveLayer
 from ...projective import ProjectiveUHG
 
+class UHGAttentionLayer(ProjectiveLayer):
+    """UHG-compliant attention layer.
+    
+    This layer implements attention mechanisms following UHG principles,
+    ensuring all operations preserve cross-ratios and hyperbolic structure.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        num_heads: int = 1,
+        dropout: float = 0.0,
+        bias: bool = True
+    ):
+        super().__init__(in_features, out_features)
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.bias = bias
+        
+        # Initialize attention parameters
+        self.query = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        self.key = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        self.value = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        
+        if bias:
+            self.query_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+            self.key_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+            self.value_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+        else:
+            self.register_parameter('query_bias', None)
+            self.register_parameter('key_bias', None)
+            self.register_parameter('value_bias', None)
+            
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        """Initialize parameters following UHG principles."""
+        for param in [self.query, self.key, self.value]:
+            nn.init.kaiming_uniform_(param, a=2**0.5)
+            
+        if self.bias:
+            for param in [self.query_bias, self.key_bias, self.value_bias]:
+                nn.init.zeros_(param)
+                
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass implementing UHG attention.
+        
+        Args:
+            x: Input tensor of shape (..., in_features)
+            
+        Returns:
+            Attention output of shape (..., out_features)
+        """
+        # Project inputs to query, key, value spaces
+        q = torch.einsum('...i,hoi->...ho', x, self.query)
+        k = torch.einsum('...i,hoi->...ho', x, self.key)
+        v = torch.einsum('...i,hoi->...ho', x, self.value)
+        
+        if self.bias:
+            q = q + self.query_bias
+            k = k + self.key_bias
+            v = v + self.value_bias
+            
+        # Compute attention scores using cross-ratios
+        scores = []
+        for h in range(self.num_heads):
+            head_scores = []
+            for i in range(q.size(-2)):
+                row_scores = []
+                for j in range(k.size(-2)):
+                    # Use cross-ratio as attention score
+                    cr = self.uhg.cross_ratio(
+                        q[..., h, i].unsqueeze(-1),
+                        k[..., h, j].unsqueeze(-1),
+                        v[..., h, i].unsqueeze(-1),
+                        v[..., h, j].unsqueeze(-1)
+                    )
+                    row_scores.append(cr)
+                head_scores.append(torch.stack(row_scores, dim=-1))
+            scores.append(torch.stack(head_scores, dim=-2))
+        scores = torch.stack(scores, dim=-3)
+        
+        # Apply softmax and dropout
+        attention = F.softmax(scores, dim=-1)
+        if self.training:
+            attention = F.dropout(attention, p=self.dropout)
+            
+        # Compute weighted sum
+        output = torch.matmul(attention, v)
+        
+        # Average across heads
+        output = output.mean(dim=-2)
+        
+        return output
+
 class ProjectiveAttention(ProjectiveLayer):
     """Attention layer using projective geometry.
     

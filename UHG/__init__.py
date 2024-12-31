@@ -17,7 +17,7 @@ from .threat_indicators import (
     ThreatCorrelation
 )
 
-__version__: str = "0.2.3"
+__version__: str = "0.2.4"
 __all__: List[str] = [
     # Core components
     "ProjectiveUHG",

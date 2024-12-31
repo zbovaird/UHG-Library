@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2024-03-19
+
+### Fixed
+- Corrected quadrance calculation to match UHG.pdf definition
+- Fixed spread computation for better numerical stability
+- Updated cross law implementation to handle all cases correctly
+- Revised cross ratio calculation to use direct hyperbolic joins
+- Improved handling of special cases in geometric operations
+- Enhanced numerical stability across all core operations
+
 ## [0.2.0] - 2023-12-07
 
 ### Added

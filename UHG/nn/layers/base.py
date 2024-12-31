@@ -31,3 +31,24 @@ class UHGLayer(nn.Module):
         
     def forward(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement forward method")
+
+class ProjectiveLayer(UHGLayer):
+    """Layer that operates in projective space while preserving UHG principles.
+    
+    This layer implements the core projective operations needed by other layers.
+    All transformations preserve cross-ratios and hyperbolic structure.
+    """
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        """Initialize weights to preserve hyperbolic structure."""
+        nn.init.kaiming_uniform_(self.weight, a=2**0.5)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply projective transformation preserving UHG structure."""
+        return self.projective_transform(x, self.weight)

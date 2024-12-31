@@ -321,3 +321,72 @@ class PatternCorrelator:
         strength_diff = abs(p1.strength - p2.strength)
         
         return access_similar and perm_similar and strength_diff < 0.2
+
+    def encode_patterns(self, patterns: List[Dict[str, any]], pattern_type: str) -> torch.Tensor:
+        """
+        Encode a list of patterns into hyperbolic space.
+        
+        Args:
+            patterns: List of patterns to encode
+            pattern_type: Type of patterns (access, permission, temporal, etc.)
+            
+        Returns:
+            Tensor of encoded patterns
+        """
+        return torch.stack([
+            self._encode_pattern(p, pattern_type) for p in patterns
+        ]).to(self.device)
+
+    def compute_risk_score(self, pattern: CorrelationPattern) -> float:
+        """
+        Compute risk score for a correlation pattern.
+        
+        Args:
+            pattern: The correlation pattern to score
+            
+        Returns:
+            Risk score between 0 and 1
+        """
+        return self._compute_risk_score(
+            pattern.components.get("access", {}),
+            pattern.components.get("permission", {}),
+            pattern.components.get("temporal", {})
+        )
+
+    def compute_pattern_similarity(
+        self,
+        pattern1: CorrelationPattern,
+        pattern2: CorrelationPattern
+    ) -> float:
+        """
+        Compute similarity between two correlation patterns.
+        
+        Args:
+            pattern1: First correlation pattern
+            pattern2: Second correlation pattern
+            
+        Returns:
+            Similarity score between 0 and 1
+        """
+        # Encode components
+        p1_features = []
+        p2_features = []
+        
+        for component in ["access", "permission", "temporal"]:
+            if component in pattern1.components and component in pattern2.components:
+                f1 = self._encode_pattern(pattern1.components[component], component)
+                f2 = self._encode_pattern(pattern2.components[component], component)
+                p1_features.append(f1)
+                p2_features.append(f2)
+        
+        if not p1_features:
+            return 0.0
+        
+        # Stack features
+        p1_tensor = torch.stack(p1_features)
+        p2_tensor = torch.stack(p2_features)
+        
+        # Compute cosine similarity
+        similarity = F.cosine_similarity(p1_tensor, p2_tensor, dim=-1).mean()
+        
+        return similarity.item()

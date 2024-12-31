@@ -103,8 +103,18 @@ class ProjectiveSAGEConv(UHGLayer):
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
         """Aggregate neighborhood features using projective operations."""
+        # Get output size
+        if size is not None:
+            out_size = size[1]
+        else:
+            out_size = x.size(0)
+        
+        # Initialize output with correct dimensions
+        out = torch.zeros(out_size, self.out_features + 1, device=x.device)
+        out[..., -1] = 1.0  # Set homogeneous coordinate
+        
         # Sample neighbors if specified
-        edge_index = self.sample_neighbors(edge_index, x.size(0))
+        edge_index = self.sample_neighbors(edge_index, out_size)
         row, col = edge_index
         
         # Get neighbor features
@@ -112,33 +122,30 @@ class ProjectiveSAGEConv(UHGLayer):
         
         if self.aggregator == 'mean':
             # Mean aggregation with cross-ratio weights
-            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
-            out[..., -1] = 1.0  # Set homogeneous coordinate
-            
             # Compute weights using cross-ratios
             weights = []
             for i in range(len(row)):
                 src, dst = row[i], col[i]
-                weight = self.compute_cross_ratio_weight(x[src], x[dst])
-                weights.append(weight)
+                if src < x.size(0) and dst < x.size(0):
+                    weight = self.compute_cross_ratio_weight(x[src], x[dst])
+                    weights.append(weight)
+                else:
+                    weights.append(0.0)
             
             weights = torch.tensor(weights, device=x.device)
-            weights = weights / weights.sum()
+            weights = weights / (weights.sum() + 1e-8)
             
             # Weighted aggregation
             for i, w in enumerate(weights):
-                out[row[i]] += w * self.projective_transform(neigh_features[i:i+1], self.W_neigh)[0]
+                if row[i] < out_size and col[i] < x.size(0):
+                    out[row[i]] += w * self.projective_transform(neigh_features[i:i+1], self.W_neigh)[0]
                 
         elif self.aggregator == 'max':
             # Max aggregation in projective space
             transformed = self.projective_transform(neigh_features, self.W_neigh)
             
-            # Initialize output
-            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
-            out[..., -1] = 1.0
-            
             # Max pooling for each node's neighbors
-            for node in range(x.size(0)):
+            for node in range(min(x.size(0), out_size)):
                 mask = row == node
                 if mask.any():
                     node_neighs = transformed[mask]
@@ -146,15 +153,13 @@ class ProjectiveSAGEConv(UHGLayer):
                     max_feats = torch.max(node_neighs[..., :-1], dim=0)[0]
                     # Add homogeneous coordinate back
                     out[node] = torch.cat([max_feats, torch.ones(1, device=x.device)])
-                    
+                
         else:  # LSTM
             # LSTM aggregation
             transformed = self.projective_transform(neigh_features, self.W_neigh)
-            out = torch.zeros(x.size(0), self.out_features + 1, device=x.device)
-            out[..., -1] = 1.0
             
             # Process each node's neighbors through LSTM
-            for node in range(x.size(0)):
+            for node in range(min(x.size(0), out_size)):
                 mask = row == node
                 if mask.any():
                     node_neighs = transformed[mask][..., :-1]  # Remove homogeneous coordinate
@@ -162,7 +167,7 @@ class ProjectiveSAGEConv(UHGLayer):
                     lstm_out, _ = self.lstm(node_neighs)
                     # Use last LSTM output
                     out[node, :-1] = lstm_out[0, -1]
-                    
+                
         return out
         
     def compute_cross_ratio_weight(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
@@ -192,14 +197,38 @@ class ProjectiveSAGEConv(UHGLayer):
         if x.size(-1) == self.in_features:
             x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
             
+        # Get output size
+        if size is not None:
+            out_size = size[1]
+        else:
+            out_size = x.size(0)
+        
         # Transform self features
         self_trans = self.projective_transform(x, self.W_self)
+        
+        # Ensure self_trans has correct size
+        if self_trans.size(0) < out_size:
+            pad_size = out_size - self_trans.size(0)
+            self_trans = torch.cat([
+                self_trans,
+                torch.zeros(pad_size, self_trans.size(1), device=x.device)
+            ], dim=0)
+            self_trans[self_trans.size(0)-pad_size:, -1] = 1.0
         
         # Aggregate and transform neighbor features
         neigh_trans = self.aggregate_neighbors(x, edge_index, size)
         
+        # Ensure neigh_trans has correct size
+        if neigh_trans.size(0) < out_size:
+            pad_size = out_size - neigh_trans.size(0)
+            neigh_trans = torch.cat([
+                neigh_trans,
+                torch.zeros(pad_size, neigh_trans.size(1), device=x.device)
+            ], dim=0)
+            neigh_trans[neigh_trans.size(0)-pad_size:, -1] = 1.0
+        
         # Combine using projective average with equal weights
-        points = torch.stack([self_trans, neigh_trans])
+        points = torch.stack([self_trans[:out_size], neigh_trans[:out_size]])
         weights = torch.tensor([0.5, 0.5], device=x.device)
         out = self.uhg.projective_average(points, weights)
         

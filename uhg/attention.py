@@ -187,43 +187,49 @@ class UHGMultiHeadAttention(nn.Module):
         self,
         q: torch.Tensor,
         k: torch.Tensor,
-        mask: torch.Tensor = None
+        mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Compute attention scores using pure projective operations."""
-        batch_size = q.shape[0]
-        num_queries = q.shape[1]
-        num_keys = k.shape[1]
+        batch_size, num_heads, num_queries, _ = q.shape
+        num_keys = k.shape[2]
         
         # Initialize attention scores
-        scores = torch.zeros(batch_size, num_queries, num_keys, device=q.device)
+        scores = torch.zeros(batch_size, num_heads, num_queries, num_keys, device=q.device)
+        
+        # Normalize inputs
+        q = self._normalize_projective(q)
+        k = self._normalize_projective(k)
         
         if self.config.use_cross_ratio:
-            # Use cross-ratio based attention
+            # Use vectorized cross-ratio computation
+            # Compute pairwise cross-ratios
             for b in range(batch_size):
-                for i in range(num_queries):
-                    for j in range(num_keys):
-                        # Get ideal points
-                        i1, i2 = self._get_ideal_points(q[b, i])
-                        
-                        # Compute cross-ratio based score
-                        cr = self.uhg.cross_ratio(q[b, i], k[b, j], i1, i2)
-                        scores[b, i, j] = 1 / (1 + torch.abs(torch.log(cr + self.config.eps)))
+                for h in range(num_heads):
+                    for i in range(num_queries):
+                        for j in range(num_keys):
+                            # Get ideal points
+                            i1, i2 = self._get_ideal_points(q[b, h, i])
+                            
+                            # Compute cross-ratio based score
+                            cr = self.uhg.cross_ratio(q[b, h, i], k[b, h, j], i1, i2)
+                            scores[b, h, i, j] = 1 / (1 + torch.abs(torch.log(torch.abs(cr) + self.config.eps)))
         else:
-            # Use projective distance based attention
-            for i in range(num_queries):
-                for j in range(num_keys):
-                    # Get ideal points
-                    i1, i2 = self._get_ideal_points(q[:, i])
-                    
-                    # Compute projective distance using cross-ratio
-                    cr = self.uhg.cross_ratio(q[:, i], k[:, j], i1, i2)
-                    scores[:, i, j] = 1 / (1 + torch.abs(torch.log(cr + self.config.eps)))
+            # Use hyperbolic distance based attention
+            # Compute pairwise distances in hyperbolic space
+            q_norm = self.uhg.normalize_points(q)  # [B, H, Q, D]
+            k_norm = self.uhg.normalize_points(k)  # [B, H, K, D]
+            
+            # Compute hyperbolic inner products
+            for b in range(batch_size):
+                for h in range(num_heads):
+                    inner_prod = torch.einsum('qd,kd->qk', q_norm[b, h, :, :-1], k_norm[b, h, :, :-1])
+                    scores[b, h] = torch.softmax(-inner_prod / torch.sqrt(torch.tensor(q.size(-1))), dim=-1)
         
         # Apply mask if provided
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))
         
-        # Apply softmax
+        # Apply softmax and dropout
         scores = torch.softmax(scores, dim=-1)
         scores = self.dropout(scores)
         
@@ -305,55 +311,53 @@ class UHGMultiHeadAttention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: torch.Tensor = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass using pure projective operations."""
+        mask: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass of UHG attention."""
         batch_size = query.shape[0]
-        num_queries = query.shape[1]
-        num_keys = key.shape[1]
         
-        # Initialize outputs
-        outputs = []
-        all_weights = []
+        # Add homogeneous coordinates if needed
+        query = self._ensure_projective(query)
+        key = self._ensure_projective(key)
+        value = self._ensure_projective(value)
         
-        # Process each attention head
+        # Transform inputs for each head
+        q = []
+        k = []
+        v = []
         for h in range(self.config.num_heads):
-            # Apply projective transformations
-            q = self._projective_transform(query, self.W_q[h])
-            k = self._projective_transform(key, self.W_k[h])
-            v = self._projective_transform(value, self.W_v[h])
-            
-            # Compute attention scores
-            weights = self._compute_attention_scores(q, k, mask)
-            all_weights.append(weights)
-            
-            # Apply attention using projective operations
-            head_output = []
-            for i in range(num_queries):
-                # Weighted combination using projective operations
-                point = torch.zeros_like(v[:, 0])
-                point[..., -1] = 1.0  # Initialize with proper homogeneous coordinate
-                
-                for j in range(num_keys):
-                    weight = weights[:, i, j].unsqueeze(-1)
-                    # Join weighted points
-                    line = self.uhg.join(point, v[:, j])
-                    point = self.uhg.meet(line, weight * v[:, j])
-                    # Ensure homogeneous coordinate is 1
-                    point = point / (point[..., -1:] + self.config.eps)
-                head_output.append(point)
-            
-            head_output = torch.stack(head_output, dim=1)
-            outputs.append(head_output)
+            q_h = self._projective_transform(query, self.W_q[h])
+            k_h = self._projective_transform(key, self.W_k[h])
+            v_h = self._projective_transform(value, self.W_v[h])
+            q.append(q_h)
+            k.append(k_h)
+            v.append(v_h)
         
-        # Combine heads using projective operations
-        outputs = torch.cat(outputs, dim=-1)
-        outputs = self._projective_transform(outputs, self.W_o)
+        # Stack heads
+        q = torch.stack(q, dim=1)  # [B, H, N, D]
+        k = torch.stack(k, dim=1)  # [B, H, N, D]
+        v = torch.stack(v, dim=1)  # [B, H, N, D]
         
-        # Return spatial coordinates for compatibility
-        outputs = outputs[..., :self.config.feature_dim]
+        # Compute attention scores
+        attention_weights = self._compute_attention_scores(q, k, mask)  # [B, H, Q, K]
         
-        # Stack attention weights
-        attention_weights = torch.stack(all_weights, dim=1)
+        # Apply attention to values
+        out = torch.zeros_like(q)
+        for b in range(batch_size):
+            for h in range(self.config.num_heads):
+                for i in range(q.size(2)):  # For each query
+                    # Weighted sum of values
+                    weighted_sum = torch.zeros_like(v[b, h, 0])
+                    for j in range(k.size(2)):  # For each key
+                        weighted_sum += attention_weights[b, h, i, j] * v[b, h, j]
+                    out[b, h, i] = self.uhg.normalize_points(weighted_sum)
         
-        return outputs, attention_weights 
+        # Merge heads
+        out = out.permute(0, 2, 1, 3).contiguous()  # [B, N, H, D]
+        out = out.view(batch_size, -1, self.config.feature_dim + 1)  # [B, N, D]
+        
+        # Final output projection
+        out = self._projective_transform(out, self.W_o)
+        
+        # Return output and attention weights
+        return out[..., :-1], attention_weights  # Remove homogeneous coordinate from output 
