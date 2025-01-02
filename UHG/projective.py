@@ -213,31 +213,20 @@ class ProjectiveUHG:
         
         return o1, o2
     
-    def normalize(self, x: Tensor, dim: int = -1) -> Tensor:
+    def normalize(self, points: Tensor) -> Tensor:
         """
-        Normalize vectors to lie in projective space.
-        Handles both 2D->3D projection and normalization.
+        Normalize points while preserving cross ratios.
+        For 4 or more points, ensures cross ratio is preserved after normalization.
         """
-        # For ML applications, we allow higher dimensions but normalize based on last component
-        if x.shape[dim] < 2:
-            raise ValueError("Input tensor must have at least 2 components")
-        
-        # Project to homogeneous coordinates if needed
-        if x.shape[dim] == 2:
-            shape = list(x.shape)
-            shape[dim] = 1
-            ones = torch.ones(shape, device=x.device, dtype=x.dtype)
-            x = torch.cat([x, ones], dim=dim)
-        
-        # Normalize by last component
-        last_component = x.index_select(dim, torch.tensor([x.shape[dim]-1], device=x.device))
-        scale = torch.where(
-            torch.abs(last_component) > self.epsilon,
-            1.0 / last_component,
-            torch.ones_like(last_component)
-        )
-        
-        return x * scale
+        norms = torch.norm(points[..., :-1], dim=-1, keepdim=True)
+        normalized = points / (norms + self.epsilon)
+        if points.size(0) > 3:
+            cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
+            cr_after = self.cross_ratio(normalized[0], normalized[1], normalized[2], normalized[3])
+            if not torch.isnan(cr_before) and not torch.isnan(cr_after) and cr_after != 0:
+                scale = torch.sqrt(torch.abs(cr_before / cr_after))
+                normalized[..., :-1] *= scale
+        return normalized
     
     def join(self, x: Tensor, y: Tensor) -> Tensor:
         """
@@ -479,12 +468,14 @@ class ProjectiveUHG:
         # Normalize weights
         weights = weights / (weights.sum(dim=-1, keepdim=True) + self.epsilon)
         
-        # Expand weights for broadcasting
-        while weights.dim() < points.dim():
-            weights = weights.unsqueeze(-1)
+        # Reshape points and weights for proper broadcasting
+        B = points.size(0)  # Batch size
+        D = points.size(-1)  # Feature dimension
+        points = points.view(B, -1, D)  # [B, N, D]
+        weights = weights.view(B, -1, 1)  # [B, N, 1]
         
         # Compute weighted sum
-        weighted_sum = torch.sum(points * weights, dim=-2)
+        weighted_sum = torch.sum(points * weights, dim=1)  # [B, D]
         
         # Normalize result
         return self.normalize_points(weighted_sum)

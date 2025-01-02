@@ -16,6 +16,12 @@ def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4
     Returns:
         Cross-ratio value
     """
+    # Convert inputs to double precision
+    p1 = p1.double() if p1.dtype != torch.float64 else p1
+    p2 = p2.double() if p2.dtype != torch.float64 else p2
+    p3 = p3.double() if p3.dtype != torch.float64 else p3
+    p4 = p4.double() if p4.dtype != torch.float64 else p4
+    
     # Compute hyperbolic dot products
     def hyperbolic_dot(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         # Split into spatial and time components
@@ -34,7 +40,7 @@ def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4
     BC = hyperbolic_dot(p2, p3)
     
     # Add small epsilon to prevent division by zero
-    eps = 1e-8
+    eps = torch.tensor(1e-8, dtype=torch.float64, device=p1.device)
     
     # Compute cross-ratio
     return (AC * BD) / (AD * BC + eps)

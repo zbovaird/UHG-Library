@@ -9,7 +9,7 @@ are used, following strict UHG principles.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from .base import ProjectiveLayer
 from ...projective import ProjectiveUHG
 from ...utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
@@ -42,30 +42,33 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         level_dim: int = 8,
         bias: bool = True
     ):
-        # Initialize base class without resetting parameters
+        # Initialize base class without reset_parameters
         nn.Module.__init__(self)
-        self.uhg = ProjectiveUHG()
         self.in_features = in_features
         self.out_features = out_features
+        self.uhg = ProjectiveUHG()
         
-        # Store dimensions
+        # Store hierarchical parameters
         self.num_levels = num_levels
         self.level_dim = level_dim
         
-        # Register parameters with correct dimensions
-        self.register_parameter('W_self', nn.Parameter(torch.Tensor(out_features, in_features)))
-        self.register_parameter('W_neigh', nn.Parameter(torch.Tensor(out_features, in_features)))
-        self.register_parameter('W_parent', nn.Parameter(torch.Tensor(out_features, in_features)))
-        self.register_parameter('W_child', nn.Parameter(torch.Tensor(out_features, in_features)))
-        self.register_parameter('W_level', nn.Parameter(torch.Tensor(out_features, level_dim)))
-        self.register_parameter('level_encodings', nn.Parameter(torch.Tensor(num_levels, level_dim)))
+        # Set epsilon for numerical stability
+        self.eps = 1e-15  # Small epsilon for float64
+        
+        # Register parameters
+        self.register_parameter('level_encodings', nn.Parameter(torch.empty(num_levels, level_dim, dtype=torch.float64)))
+        self.register_parameter('W_self', nn.Parameter(torch.empty(out_features, in_features, dtype=torch.float64)))
+        self.register_parameter('W_neigh', nn.Parameter(torch.empty(out_features, in_features, dtype=torch.float64)))
+        self.register_parameter('W_parent', nn.Parameter(torch.empty(out_features, in_features, dtype=torch.float64)))
+        self.register_parameter('W_child', nn.Parameter(torch.empty(out_features, in_features, dtype=torch.float64)))
+        self.register_parameter('W_level', nn.Parameter(torch.empty(out_features, level_dim, dtype=torch.float64)))
         
         if bias:
-            self.register_parameter('bias', nn.Parameter(torch.Tensor(out_features)))
+            self.register_parameter('bias', nn.Parameter(torch.empty(out_features, dtype=torch.float64)))
         else:
             self.register_parameter('bias', None)
             
-        # Now reset parameters
+        # Now initialize parameters
         self.reset_parameters()
         
     def reset_parameters(self):
@@ -84,15 +87,24 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
             # Initialize bias with small values
             nn.init.zeros_(self.bias)
             
-    def projective_transform(
-        self,
-        x: torch.Tensor,
-        weight: torch.Tensor,
-        preserve_cr: bool = True
-    ) -> torch.Tensor:
-        """Apply projective transformation preserving cross-ratios."""
-        # Use UHG projective transform directly
-        return self.uhg.transform(x, weight)
+    def _normalize_with_homogeneous(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize features while preserving homogeneous coordinate."""
+        features = x[..., :-1]
+        homogeneous = x[..., -1:]
+        normalized_features = self.uhg.normalize(features)
+        return torch.cat([normalized_features, homogeneous], dim=-1)
+        
+    def _track_cross_ratios(self, x: torch.Tensor) -> List[torch.Tensor]:
+        """Track cross-ratios for preservation."""
+        crs = []
+        if x.size(0) > 3:
+            for i in range(0, x.size(0)-3, 2):
+                cr = compute_cross_ratio(
+                    x[i], x[i+1], x[i+2], x[i+3]
+                )
+                if not torch.isnan(cr) and not torch.isinf(cr):
+                    crs.append(cr)
+        return crs
         
     def compute_cross_ratio_weight(
         self,
@@ -104,11 +116,38 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         # Use UHG distance for weight computation
         dist = self.uhg.distance(p1, p2)
         
-        # Adjust weight based on level difference using exponential decay
-        level_factor = torch.exp(-torch.abs(torch.tensor(level_diff, dtype=torch.float32)))
+        # Stronger level factor for better hierarchy preservation
+        level_factor = torch.exp(-2.0 * torch.abs(torch.tensor(level_diff, dtype=torch.float32)))
+        
+        # Compute weight with stronger level influence
         weight = torch.exp(-dist) * level_factor
         
-        return weight.clamp(0.1, 0.9)  # Prevent extreme values
+        # Allow wider range for better differentiation
+        return weight.clamp(0.05, 0.95)
+        
+    def _compute_dynamic_weights(
+        self,
+        node_levels: torch.Tensor,
+        N: int,
+        device: torch.device
+    ) -> torch.Tensor:
+        """Compute dynamic weights based on level structure."""
+        level_diffs = torch.abs(node_levels.unsqueeze(1) - node_levels.unsqueeze(0))
+        same_level_mask = (level_diffs == 0).float()
+        parent_mask = (level_diffs == 1).float()
+        child_mask = (level_diffs == -1).float()
+        
+        weights = torch.stack([
+            0.4 * torch.ones(N, device=device),  # self weight
+            0.3 * same_level_mask.sum(1),        # same level weight
+            0.15 * parent_mask.sum(1),           # parent weight
+            0.15 * child_mask.sum(1),            # child weight
+            0.1 * torch.ones(N, device=device)   # level encoding weight
+        ], dim=1)
+        
+        # Normalize weights
+        weights = weights / weights.sum(1, keepdim=True)
+        return weights
         
     def aggregate_hierarchical(
         self,
@@ -118,107 +157,100 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
         """Aggregate features using hierarchical structure and projective operations."""
-        # Store initial cross-ratio if enough points
-        has_cr = x.size(0) > 3
-        if has_cr:
-            cr_initial = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
-            
-        row, col = edge_index
+        # Convert inputs to float64
+        x = self._to_double(x)
+        node_levels = node_levels.to(x.device)
         
-        # Initialize output with correct dimensions
+        # Track initial cross-ratios
+        initial_crs = self._track_cross_ratios(x)
+        
+        row, col = edge_index
         N = x.size(0)
-        out = torch.zeros(N, self.out_features + 1, device=x.device)
-        out[..., -1] = 1.0  # Set homogeneous coordinate to 1
         
         # Add homogeneous coordinate if not present
         if x.size(-1) == self.in_features:
-            x = self.uhg.normalize(x)
-            x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
+            x = torch.cat([x, torch.ones_like(x[..., :1], dtype=torch.float64)], dim=-1)
             
-        # Get level encodings for each node and transform
+        # Transform and normalize level encodings
         node_level_enc = F.embedding(node_levels, self.level_encodings)
-        # Normalize level encodings using UHG
-        node_level_enc = self.uhg.normalize(node_level_enc)
-        level_features = torch.cat([node_level_enc, torch.ones_like(node_level_enc[..., :1])], dim=-1)
-        level_features = self.projective_transform(level_features, self.W_level)
+        level_features = torch.cat([node_level_enc, torch.ones_like(node_level_enc[..., :1], dtype=torch.float64)], dim=-1)
+        level_features = self._normalize_with_homogeneous(self.projective_transform(level_features, self.W_level))
         
-        # Transform nodes with different weights based on relationship
-        nodes_self = self.projective_transform(x, self.W_self)
-        nodes_neigh = self.projective_transform(x, self.W_neigh)
-        nodes_parent = self.projective_transform(x, self.W_parent)
-        nodes_child = self.projective_transform(x, self.W_child)
+        # Transform and normalize node features
+        nodes_self = self._normalize_with_homogeneous(self.projective_transform(x, self.W_self))
+        nodes_neigh = self._normalize_with_homogeneous(self.projective_transform(x, self.W_neigh))
+        nodes_parent = self._normalize_with_homogeneous(self.projective_transform(x, self.W_parent))
+        nodes_child = self._normalize_with_homogeneous(self.projective_transform(x, self.W_child))
         
-        # Create adjacency matrices for different relationships
-        adj_same = torch.zeros(N, N, device=x.device)
-        adj_parent = torch.zeros(N, N, device=x.device)
-        adj_child = torch.zeros(N, N, device=x.device)
+        # Initialize aggregated features
+        agg_same = torch.zeros_like(nodes_neigh, dtype=torch.float64)
+        agg_parent = torch.zeros_like(nodes_parent, dtype=torch.float64)
+        agg_child = torch.zeros_like(nodes_child, dtype=torch.float64)
         
-        # Compute weights for all edges
+        # Count neighbors for normalization
+        same_count = torch.zeros(N, 1, device=x.device, dtype=torch.float64)
+        parent_count = torch.zeros(N, 1, device=x.device, dtype=torch.float64)
+        child_count = torch.zeros(N, 1, device=x.device, dtype=torch.float64)
+        
+        # Aggregate features with level-aware weights
         for i in range(len(row)):
             src, dst = row[i], col[i]
             src_level = node_levels[src].item()
             dst_level = node_levels[dst].item()
             level_diff = dst_level - src_level
             
-            # Compute weight using cross-ratio
+            # Compute weight using cross-ratio and level difference
             weight = self.compute_cross_ratio_weight(x[src], x[dst], level_diff)
             
             if level_diff == 0:
-                adj_same[src, dst] = weight
+                agg_same[dst] += weight * nodes_neigh[src]
+                same_count[dst] += weight  # Weight-based counting
             elif level_diff > 0:
-                adj_parent[src, dst] = weight
+                agg_parent[dst] += weight * nodes_parent[src]
+                parent_count[dst] += weight
             else:
-                adj_child[src, dst] = weight
+                agg_child[dst] += weight * nodes_child[src]
+                child_count[dst] += weight
                 
-        # Normalize adjacency matrices with numerical stability
-        adj_same = adj_same / (adj_same.sum(dim=1, keepdim=True) + 1e-8)
-        adj_parent = adj_parent / (adj_parent.sum(dim=1, keepdim=True) + 1e-8)
-        adj_child = adj_child / (adj_child.sum(dim=1, keepdim=True) + 1e-8)
+        # Normalize aggregated features with regularization
+        agg_same = agg_same / (same_count + self.eps)
+        agg_parent = agg_parent / (parent_count + self.eps)
+        agg_child = agg_child / (child_count + self.eps)
         
-        # Aggregate features from different relationships using UHG operations
-        out_same = self.uhg.aggregate(nodes_neigh, adj_same)
-        out_parent = self.uhg.aggregate(nodes_parent, adj_parent)
-        out_child = self.uhg.aggregate(nodes_child, adj_child)
+        # Compute dynamic weights based on level structure
+        weights = self._compute_dynamic_weights(node_levels, N, x.device)
         
-        # Stack all points for each node
-        points = torch.stack([
+        # Stack features and combine
+        stacked_features = torch.stack([
             nodes_self,
-            out_same,
-            out_parent,
-            out_child,
+            agg_same,
+            agg_parent,
+            agg_child,
             level_features
         ], dim=1)  # [N, 5, D+1]
         
-        # Create weights tensor for each node
-        weights = torch.tensor([0.3, 0.3, 0.15, 0.15, 0.1], device=x.device)
+        # Combine using weighted average in projective space
+        B = stacked_features.size(0)  # Batch size
+        stacked_features = stacked_features.view(B * 5, -1)  # [B*5, D+1]
+        weights = weights.view(B, 5).repeat_interleave(5, dim=0).to(torch.float64)  # [B*5]
         
-        # Average points for each node separately
-        out = torch.stack([
-            self.uhg.projective_average(points[i], weights)
-            for i in range(N)
-        ])
+        # Add regularization to weights
+        weights = weights + self.eps
+        weights = weights / weights.sum(dim=0, keepdim=True)  # Normalize per node
         
-        if self.bias is not None:
-            # Add bias in projective space with proper normalization
-            bias_point = torch.cat([self.bias, torch.ones_like(self.bias[:1])], dim=0)
-            bias_point = self.uhg.normalize(bias_point)
-            bias_weights = torch.tensor([0.9, 0.1], device=x.device)
-            out = torch.stack([
-                self.uhg.projective_average(
-                    torch.stack([out[i], bias_point]),
-                    bias_weights
-                )
-                for i in range(N)
-            ])
-            
-        # Restore initial cross-ratio if needed
-        if has_cr:
-            cr_final = self.uhg.cross_ratio(out[0], out[1], out[2], out[3])
-            if not torch.isnan(cr_final) and not torch.isnan(cr_initial) and cr_final != 0:
-                scale = torch.sqrt(torch.abs(cr_initial / cr_final))
-                out = self.uhg.scale(out, scale)
-            
-        return out
+        # Aggregate and normalize
+        out = self._normalize_with_homogeneous(self.uhg.aggregate(stacked_features, weights))
+        
+        # Reshape to match input batch size
+        out = out.view(B, -1)  # [B, D+1]
+        
+        # Restore cross-ratios if needed
+        if initial_crs:
+            for cr in initial_crs:
+                out = restore_cross_ratio(out, cr)
+                out = self._normalize_with_homogeneous(out)
+                
+        return out[..., :-1]  # Return only feature part
         
     def forward(
         self,
@@ -231,6 +263,6 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         # Aggregate features using hierarchical structure
         out = self.aggregate_hierarchical(x, edge_index, node_levels, size)
         
-        # Return normalized feature part using UHG
+        # Return normalized feature part
         features = out[..., :-1]
         return self.uhg.normalize(features) 

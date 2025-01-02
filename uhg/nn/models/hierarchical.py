@@ -89,49 +89,47 @@ class ProjectiveHierarchicalGNN(nn.Module):
             )
         )
         
-    def projective_dropout(self, x: torch.Tensor, p: float) -> torch.Tensor:
-        """Apply dropout while preserving projective structure and cross-ratios."""
-        if not self.training or p == 0:
+    def projective_dropout(self, x: torch.Tensor, p: float = 0.5) -> torch.Tensor:
+        """Apply dropout while preserving projective structure."""
+        if not self.training or p == 0.0:
             return x
-            
-        # Store original cross-ratio if enough points
-        has_cr = x.size(0) > 3
-        if has_cr:
-            cr_before = self.uhg.cross_ratio(x[0], x[1], x[2], x[3])
-            
-        # Extract features and homogeneous coordinate
-        features = x[..., :-1]
-        homogeneous = x[..., -1:]
-        
-        # Create dropout mask for features
-        mask = torch.bernoulli(torch.full_like(features, 1 - p))
-        
-        # Ensure at least one feature survives per node
-        zero_rows = (mask.sum(dim=-1) == 0)
-        if zero_rows.any():
-            # For rows with all zeros, randomly keep one feature
-            random_feature = torch.randint(0, features.size(-1), (zero_rows.sum(),), device=x.device)
-            mask[zero_rows, random_feature] = 1
-            
-        # Scale mask to maintain expected value
-        mask = mask / (1 - p + 1e-8)
-        
-        # Apply dropout to features
-        dropped_features = features * mask
-        
-        # Normalize features using UHG
-        dropped_features = self.uhg.normalize(dropped_features)
-        
-        # Combine with homogeneous coordinate
-        dropped = torch.cat([dropped_features, homogeneous], dim=-1)
-        
-        # Restore cross-ratio if needed
-        if has_cr:
-            cr_after = self.uhg.cross_ratio(dropped[0], dropped[1], dropped[2], dropped[3])
-            if not torch.isnan(cr_after) and not torch.isnan(cr_before) and cr_after != 0:
-                dropped = self.uhg.scale(dropped, torch.sqrt(torch.abs(cr_before / cr_after)))
-                
-        return dropped
+
+        # Keep homogeneous coordinate
+        features = x[:, :-1]
+        homogeneous = x[:, -1:]
+
+        # Apply dropout to features with cross-ratio preservation
+        mask = torch.bernoulli(torch.ones_like(features) * (1 - p))
+        features = features * mask / (1 - p)
+
+        # Compute hyperbolic norm
+        spatial_norm = torch.sum(features * features, dim=-1, keepdim=True)
+        time_norm = homogeneous * homogeneous
+        norm = torch.sqrt(torch.clamp(spatial_norm - time_norm + 1e-15, min=1e-15))
+
+        # Normalize features while preserving hyperbolic structure
+        features = features / (norm + 1e-15)
+
+        # Ensure time component remains stable
+        homogeneous = torch.clamp(homogeneous, min=1.0)
+
+        # Recombine with homogeneous coordinate
+        out = torch.cat([features, homogeneous], dim=-1)
+
+        # Track and restore cross-ratios if possible
+        if x.size(0) >= 4:
+            cr_before = compute_cross_ratio(x[0], x[1], x[2], x[3])
+            cr_after = compute_cross_ratio(out[0], out[1], out[2], out[3])
+            if not torch.isnan(cr_before) and not torch.isnan(cr_after) and cr_after != 0:
+                scale = torch.sqrt(torch.abs(cr_before / cr_after))
+                features = out[:, :-1] * scale
+                out = torch.cat([features, homogeneous], dim=-1)
+
+        # Final normalization to ensure unit norm in feature space
+        features = out[:, :-1]
+        spatial_norm = torch.sum(features * features, dim=-1, keepdim=True)
+        features = features / torch.sqrt(torch.clamp(spatial_norm, min=1e-15))
+        return torch.cat([features, homogeneous], dim=-1)
         
     def forward(
         self,
