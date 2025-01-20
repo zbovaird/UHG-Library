@@ -5,6 +5,7 @@ This library provides a pure implementation of UHG principles using projective g
 without relying on differential geometry or manifold concepts.
 """
 
+__version__: str = "0.3.2"
 from typing import List
 
 from .projective import ProjectiveUHG
@@ -17,7 +18,6 @@ from .threat_indicators import (
     ThreatCorrelation
 )
 
-__version__: str = "0.2.5"
 __all__: List[str] = [
     # Core components
     "ProjectiveUHG",

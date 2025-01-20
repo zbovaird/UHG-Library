@@ -14,7 +14,7 @@ def get_version():
 
 setup(
     name="uhg",
-    version=get_version(),
+    version="0.3.2",
     packages=find_packages(),
     install_requires=[
         "torch>=1.8.0",
