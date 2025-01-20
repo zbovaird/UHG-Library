@@ -1,8 +1,20 @@
 from setuptools import setup, find_packages
+import os
+import re
+
+# Read version from __init__.py
+def get_version():
+    init_py = os.path.join(os.path.dirname(__file__), 'uhg', '__init__.py')
+    with open(init_py, 'r') as f:
+        content = f.read()
+    version_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]*)['\"]", content, re.M)
+    if version_match:
+        return version_match.group(1)
+    raise RuntimeError("Unable to find version string.")
 
 setup(
     name="uhg",
-    version="0.3.1",
+    version=get_version(),
     packages=find_packages(),
     install_requires=[
         "torch>=1.8.0",
@@ -37,4 +49,4 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence"
     ],
     python_requires=">=3.8"
-) 
+)

@@ -1,3 +1,4 @@
+# code from projective.py file in cursor
 """
 Universal Hyperbolic Geometry implementation based on projective geometry.
 
@@ -28,7 +29,7 @@ class ProjectiveUHG:
     
     def __init__(self, epsilon: float = 1e-10):
         self.epsilon = epsilon
-        
+    
     def wedge(self, a: Tensor, b: Tensor) -> Tensor:
         """
         Compute wedge product of two vectors.
@@ -58,7 +59,7 @@ class ProjectiveUHG:
         wedge = torch.where(mask, wedge / (norm + self.epsilon), wedge)
         
         return wedge
-
+    
     def hyperbolic_dot(self, a: Tensor, b: Tensor) -> Tensor:
         """
         Compute hyperbolic dot product between two points.
@@ -89,7 +90,7 @@ class ProjectiveUHG:
 
     def quadrance(self, a: Tensor, b: Tensor) -> Tensor:
         """
-        Calculate quadrance between two points a=[x₁:y₁:z₁] and b=[x₂:y₂:z₂]
+        Calculate quadrance between two points a1=[x1:y1:z1] and a2=[x2:y2:z2]
         According to UHG principles:
         q(A,B) = 1 - <A,B>²/(<A,A><B,B>) for non-null points
         where <A,B> = x₁x₂ + y₁y₂ - z₁z₂
@@ -112,20 +113,26 @@ class ProjectiveUHG:
         if self.is_null_point(a) or self.is_null_point(b):
             raise ValueError("Quadrance is undefined for null points")
             
-        # Compute inner products
-        ab = self.hyperbolic_dot(a, b)
-        aa = self.hyperbolic_dot(a, a)
-        bb = self.hyperbolic_dot(b, b)
+        # Get components
+        x1, y1, z1 = a[..., 0], a[..., 1], a[..., 2]
+        x2, y2, z2 = b[..., 0], b[..., 1], b[..., 2]
         
-        # Handle numerical stability for division
+        # Compute hyperbolic dot product <A,B>
+        dot = x1*x2 + y1*y2 - z1*z2
+        
+        # Compute norms <A,A> and <B,B>
+        a_norm = x1*x1 + y1*y1 - z1*z1
+        b_norm = x2*x2 + y2*y2 - z2*z2
+        
+        # Handle numerical stability for denominator
         safe_denom = torch.where(
-            torch.abs(aa * bb) > self.epsilon,
-            aa * bb,
-            torch.ones_like(aa) * self.epsilon
+            torch.abs(a_norm * b_norm) > self.epsilon,
+            a_norm * b_norm,
+            torch.ones_like(a_norm) * self.epsilon
         )
         
-        # Compute quadrance
-        q = 1.0 - (ab * ab) / safe_denom
+        # Compute quadrance q = 1 - <A,B>²/(<A,A><B,B>)
+        q = 1.0 - dot*dot / safe_denom
         
         # Handle numerical stability for result
         q = torch.where(
@@ -143,7 +150,7 @@ class ProjectiveUHG:
         q = torch.abs(q)
         
         return q
-        
+    
     def det2(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
         """
         Compute 2x2 determinant for vectors arranged as:
@@ -378,14 +385,16 @@ class ProjectiveUHG:
         Returns:
             Transformed points
         """
-        if points.shape[-1] != 3 or matrix.shape[-2:] != (3, 3):
-            raise ValueError("Points must have shape (..., 3) and matrix must have shape (..., 3, 3)")
+        if points.shape[-1] != 3:
+            raise ValueError("Points must have shape (..., 3)")
+        if matrix.shape != (3, 3):
+            raise ValueError("Matrix must have shape (3, 3)")
             
         # Reshape points for batch matrix multiply
         points_flat = points.reshape(-1, 3)
         
         # Apply transformation
-        transformed = torch.matmul(points_flat, matrix.transpose(-2, -1))
+        transformed = torch.matmul(points_flat, matrix.transpose(0,1))
         
         # Reshape back to original
         transformed = transformed.reshape(points.shape)
@@ -452,45 +461,41 @@ class ProjectiveUHG:
         Returns:
             Normalized points
         """
-        # Handle empty tensor
-        if points.numel() == 0:
-            return points
+        if points.shape[-1] != 3:
+            raise ValueError("Points must have shape (..., 3)")
             
         # Get components
-        x, y, z = points[..., 0], points[..., 1], points[..., 2]
+        x = points[..., 0]
+        y = points[..., 1]
+        z = points[..., 2]
         
-        # Compute x² + y² - z²
-        norm = x*x + y*y - z*z
+        # Compute norms
+        space_norm = x*x + y*y
+        time_norm = z*z
         
-        # For null points (x² + y² = z²), normalize so z = 1
-        null_mask = torch.abs(norm) < self.epsilon
-        if torch.any(null_mask):
-            # Get scale factor to make z = 1
-            scale = torch.where(
-                torch.abs(z) > self.epsilon,
-                1.0 / z,
-                torch.ones_like(z)
-            )
-            points = points * scale.unsqueeze(-1)
-            return points
-            
-        # For non-null points, normalize so largest component is ±1
-        max_abs = torch.max(torch.abs(points), dim=-1, keepdim=True)[0]
-        scale = torch.where(
-            max_abs > self.epsilon,
-            1.0 / max_abs,
-            torch.ones_like(max_abs)
-        )
-        points = points * scale
+        # Check if points are null (x² + y² = z²)
+        is_null = torch.abs(space_norm - time_norm) < self.epsilon
         
-        # Ensure first non-zero component is positive
-        nonzero_mask = torch.abs(points) > self.epsilon
-        if torch.any(nonzero_mask):
-            first_nonzero = torch.where(nonzero_mask)[0][0]
-            if points[first_nonzero] < 0:
-                points = -points
-                
-        return points
+        # For null points, normalize so z = 1
+        null_scale = 1.0 / (torch.abs(z) + self.epsilon)
+        
+        # For non-null points, normalize by largest component
+        max_abs = torch.max(torch.abs(points), dim=-1)[0]
+        non_null_scale = 1.0 / (max_abs + self.epsilon)
+        
+        # Choose appropriate scaling based on whether point is null
+        scale = torch.where(is_null, null_scale, non_null_scale)
+        
+        # Apply scaling
+        normalized = points * scale.unsqueeze(-1)
+        
+        # Handle sign consistently - make largest absolute component positive
+        max_abs_idx = torch.argmax(torch.abs(normalized), dim=-1)
+        max_abs_val = torch.gather(normalized, -1, max_abs_idx.unsqueeze(-1))
+        sign_correction = torch.sign(max_abs_val)
+        normalized = normalized * sign_correction
+        
+        return normalized
     
     def projective_average(self, points: Tensor, weights: Tensor) -> Tensor:
         """
@@ -607,18 +612,21 @@ class ProjectiveUHG:
         Returns:
             Boolean tensor indicating if point is null
         """
-        # First normalize point
+        # First normalize the point
         point = self.normalize_points(point)
         
         # Get components
-        x, y, z = point[..., 0], point[..., 1], point[..., 2]
+        x = point[..., 0]
+        y = point[..., 1]
+        z = point[..., 2]
         
-        # Compute x² + y² - z²
-        norm = x*x + y*y - z*z
+        # Compute norms
+        space_norm = x*x + y*y
+        time_norm = z*z
         
-        # Point is null if norm is close to 0
-        return torch.abs(norm) < self.epsilon
-    
+        # Check if x² + y² = z²
+        return torch.abs(space_norm - time_norm) < self.epsilon
+
     def null_point(self, t: Tensor, u: Tensor) -> Tensor:
         """
         Get null point parametrized by t:u
@@ -642,32 +650,31 @@ class ProjectiveUHG:
         Get line through two null points parametrized by (t₁:u₁) and (t₂:u₂)
         Returns (t₁t₂-u₁u₂ : t₁u₂+t₂u₁ : t₁t₂+u₁u₂)
         
+        From UHG.pdf Theorem 23, this produces a non-null line when t₁:u₁ ≠ t₂:u₂
+        
         Args:
             t1, u1: Parameters of first null point
             t2, u2: Parameters of second null point
             
         Returns:
-            Join line in projective coordinates
+            Line joining the null points (l:m:n)
+            
+        Raises:
+            ValueError: if null points are not distinct (same t:u proportions)
         """
-        # Compute components
-        x = t1*t2 - u1*u2
-        y = t1*u2 + t2*u1
-        z = t1*t2 + u1*u2
+        # Check parameter proportions are different
+        if torch.allclose(t1*u2, t2*u1, rtol=self.epsilon):
+            raise ValueError("Null points must be distinct (different t:u proportions)")
+            
+        # Compute join using Theorem 23 formula
+        line = torch.stack([
+            t1*t2 - u1*u2,  # l component
+            t1*u2 + t2*u1,  # m component
+            t1*t2 + u1*u2   # n component
+        ], dim=-1)
         
-        # Stack into line
-        line = torch.stack([x, y, z], dim=-1)
-        
-        # Normalize line
-        line = self.normalize_points(line)
-        
-        # Ensure first non-zero component is positive
-        nonzero_mask = torch.abs(line) > self.epsilon
-        if torch.any(nonzero_mask):
-            first_nonzero_idx = torch.where(nonzero_mask)[0][0]
-            if line[first_nonzero_idx] < 0:
-                line = -line
-        
-        return line
+        # Normalize with sign convention
+        return self.normalize_points(line)
     
     def join_points(self, a1: Tensor, a2: Tensor) -> Tensor:
         """
@@ -696,148 +703,235 @@ class ProjectiveUHG:
         
         return self.normalize_points(line)
     
-    def midpoints(self, a1: Tensor, a2: Tensor) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+    def triple_quad_formula(self, q1: Tensor, q2: Tensor, q3: Tensor) -> Tensor:
         """
-        Calculate midpoints of side a₁a₂.
-        From UHG.pdf Theorem 54:
-        1. Exists when p = 1 - q is a square
-        2. When existing, after normalizing to equal hyperbolic norms:
-           m₁ = [x₁+x₂ : y₁+y₂ : z₁+z₂]
-           m₂ = [x₁-x₂ : y₁-y₂ : z₁-z₂]
-        """
-        # Handle special cases
-        if torch.allclose(a1, a2, rtol=self.epsilon):
-            return a1, None
-            
-        # Check if both points are null
-        if self.is_null_point(a1) and self.is_null_point(a2):
-            return None, None
-            
-        # If one point is null, return it as the midpoint
-        if self.is_null_point(a1):
-            return a1, None
-        if self.is_null_point(a2):
-            return a2, None
-            
-        # Normalize to equal hyperbolic norms
-        norm1 = torch.abs(a1[..., 0]**2 + a1[..., 1]**2 - a1[..., 2]**2)
-        norm2 = torch.abs(a2[..., 0]**2 + a2[..., 1]**2 - a2[..., 2]**2)
-        
-        # Scale points to have equal norms
-        scale = torch.sqrt(norm1/norm2)
-        a2_scaled = a2 * scale
-        
-        # Calculate quadrance and check existence
-        q = self.quadrance(a1, a2_scaled)
-        p = 1 - q
-        
-        if p < 0:
-            return None, None
-        
-        # Construct midpoints using normalized points
-        m1 = a1 + a2_scaled
-        m2 = a1 - a2_scaled
-        
-        # Normalize resulting points
-        m1 = self.normalize_points(m1)
-        m2 = self.normalize_points(m2)
-        
-        # Handle numerical instability
-        if torch.any(torch.isnan(m1)) or torch.any(torch.isnan(m2)):
-            return None, None
-            
-        return m1, m2
-    
-    def verify_midpoints(self, a1: Tensor, a2: Tensor, m1: Tensor, m2: Tensor) -> bool:
-        """Verify midpoint properties with detailed logging"""
-        eps = 1e-5
-        print("\nMidpoint Verification:")
-        
-        # 1. Equal quadrances to endpoints
-        q11 = self.quadrance(a1, m1)
-        q21 = self.quadrance(a2, m1)
-        print(f"\nm1 quadrances:")
-        print(f"q(a1,m1)={q11}")
-        print(f"q(a2,m1)={q21}")
-        print(f"Difference: {abs(q11-q21)}")
-        if not torch.allclose(q11, q21, rtol=eps):
-            print("❌ First midpoint quadrances not equal")
-            return False
-            
-        q12 = self.quadrance(a1, m2)
-        q22 = self.quadrance(a2, m2)
-        print(f"\nm2 quadrances:")
-        print(f"q(a1,m2)={q12}")
-        print(f"q(a2,m2)={q22}")
-        print(f"Difference: {abs(q12-q22)}")
-        if not torch.allclose(q12, q22, rtol=eps):
-            print("❌ Second midpoint quadrances not equal")
-            return False
-            
-        # 2. Perpendicularity
-        dot = self.hyperbolic_dot(m1, m2)
-        print(f"\nPerpendicularity:")
-        print(f"Hyperbolic dot product: {dot}")
-        if abs(dot) > eps:
-            print("❌ Midpoints not perpendicular")
-            return False
-            
-        # 3. Cross-ratio
-        cr = self.cross_ratio(a1, a2, m1, m2)
-        print(f"\nCross-ratio: {cr}")
-        if not torch.allclose(cr, torch.tensor(-1.0), rtol=eps):
-            print("❌ Cross-ratio not -1")
-            return False
-        
-        print("\n✅ All midpoint properties verified")
-        return True
-    
-    def is_null_line(self, line: Tensor) -> bool:
-        """
-        Check if a line is null (contains its pole).
-        A line (l:m:n) is null when l² + m² = n²
-        
+        Verifies if three quadrances satisfy the triple quad formula
+        (q₁ + q₂ + q₃)² = 2(q₁² + q₂² + q₃²) + 4q₁q₂q₃
+
         Args:
-            line: Line in projective coordinates (l:m:n)
-            
+            q1, q2, q3: Three quadrances to verify
+
         Returns:
-            Boolean tensor indicating if line is null
+            Boolean tensor indicating if triple quad formula is satisfied
         """
-        # First normalize line
-        line = self.normalize_points(line)
-        
-        # Get components
+        lhs = (q1 + q2 + q3)**2
+        rhs = 2*(q1**2 + q2**2 + q3**2) + 4*q1*q2*q3
+        return torch.abs(lhs - rhs) < self.epsilon
+
+    def pythagoras(self, q1: Tensor, q2: Tensor, q3: Tensor) -> Tensor:
+        """
+        Verifies if three quadrances satisfy the hyperbolic Pythagorean theorem.
+        According to UHG.pdf Theorem 42:
+        For a right triangle (S₃ = 1), q₃ = q₁ + q₂ - q₁q₂
+
+        Args:
+            q1, q2: Quadrances of the legs of the right triangle
+            q3: Quadrance of the hypotenuse
+
+        Returns:
+            Boolean tensor indicating if hyperbolic Pythagorean theorem is satisfied
+        """
+        expected_q3 = q1 + q2 - q1*q2
+        return torch.abs(q3 - expected_q3) < self.epsilon
+
+    def spread_law(self, S1: Tensor, S2: Tensor, S3: Tensor, q1: Tensor, q2: Tensor, q3: Tensor) -> Tensor:
+        """
+        Verifies the spread law relation
+        S₁/q₁ = S₂/q₂ = S₃/q₃
+
+        Args:
+            S1, S2, S3: Three spreads
+            q1, q2, q3: Three corresponding quadrances
+
+        Returns:
+            Boolean tensor indicating if spread law is satisfied
+        """
+        ratio1 = S1/q1
+        ratio2 = S2/q2
+        ratio3 = S3/q3
+        return torch.abs(ratio1 - ratio2) < self.epsilon and torch.abs(ratio2 - ratio3) < self.epsilon
+
+    def cross_dual_law(self, S1: Tensor, S2: Tensor, S3: Tensor, q1: Tensor) -> Tensor:
+        """
+        Verifies the cross dual law
+        (S₂S₃q₁ - S₁ - S₂ - S₃ + 2)² = 4(1-S₁)(1-S₂)(1-S₃)
+
+        Args:
+            S1, S2, S3: Three spreads
+            q1: Quadrance
+
+        Returns:
+            Boolean tensor indicating if cross dual law is satisfied
+        """
+        lhs = (S2*S3*q1 - S1 - S2 - S3 + 2)**2
+        rhs = 4*(1-S1)*(1-S2)*(1-S3)
+        return torch.abs(lhs - rhs) < self.epsilon
+
+    def spread_quadrance_duality(self, L1: Tensor, L2: Tensor) -> bool:
+        """
+        Verify that spread between lines equals quadrance between dual points
+        S(L₁,L₂) = q(L₁⊥,L₂⊥)
+
+        Args:
+            L1, L2: Two lines in projective coordinates
+
+        Returns:
+            Boolean indicating if duality holds
+        """
+        spread_val = self.spread(L1, L2)
+        quad_val = self.quadrance(self.dual_line_to_point(L1), self.dual_line_to_point(L2))
+        return torch.abs(spread_val - quad_val) < self.epsilon
+
+    def point_lies_on_line(self, point: Tensor, line: Tensor) -> bool:
+        """
+        Check if point [x:y:z] lies on line (l:m:n)
+        lx + my - nz = 0
+
+        Args:
+            point: Point in projective coordinates [x:y:z]
+            line: Line in projective coordinates (l:m:n)
+
+        Returns:
+            Boolean indicating if point lies on line
+        """
+        x, y, z = point[..., 0], point[..., 1], point[..., 2]
         l, m, n = line[..., 0], line[..., 1], line[..., 2]
-        
-        # Line is null if l² + m² = n²
-        norm = l*l + m*m - n*n
-        return torch.abs(norm) < self.epsilon
-    
-    def transform_verify_midpoints(self, a1: Tensor, a2: Tensor, matrix: Tensor) -> bool:
+        return torch.abs(l*x + m*y - n*z) < self.epsilon
+
+    def points_perpendicular(self, a1: Tensor, a2: Tensor) -> bool:
         """
-        Verify that midpoints transform correctly under projective transformation
+        Check if points [x₁:y₁:z₁] and [x₂:y₂:z₂] are perpendicular
+        x₁x₂ + y₁y₂ - z₁z₂ = 0
+
+        Args:
+            a1, a2: Points in projective coordinates
+
+        Returns:
+            Boolean indicating if points are perpendicular
         """
-        # Get original midpoints
-        m1, m2 = self.midpoints(a1, a2)
-        if m1 is None or m2 is None:
-            return True  # No midpoints case
-            
-        # Transform points
-        a1_trans = self.transform(a1, matrix)
-        a2_trans = self.transform(a2, matrix)
+        return torch.abs(self.hyperbolic_dot(a1, a2)) < self.epsilon
+
+    def lines_perpendicular(self, L1: Tensor, L2: Tensor) -> bool:
+        """
+        Check if lines (l₁:m₁:n₁) and (l₂:m₂:n₂) are perpendicular
+        l₁l₂ + m₁m₂ - n₁n₂ = 0
+
+        Args:
+            L1, L2: Lines in projective coordinates
+
+        Returns:
+            Boolean indicating if lines are perpendicular
+        """
+        return torch.abs(self.hyperbolic_dot(L1, L2)) < self.epsilon
+
+    def parametrize_line_point(self, L: Tensor, p: Tensor, r: Tensor, s: Tensor) -> Tensor:
+        """
+        Get point on line L=(l:m:n) parametrized by p,r,s
+        Returns [np-ms : ls+nr : lp+mr]
+
+        Args:
+            L: Line in projective coordinates (l:m:n)
+            p, r, s: Parameters
+
+        Returns:
+            Point on line in projective coordinates
+        """
+        l, m, n = L[..., 0], L[..., 1], L[..., 2]
+        return torch.stack([n*p - m*s, l*s + n*r, l*p + m*r], dim=-1)
+
+    def are_collinear(self, a1: Tensor, a2: Tensor, a3: Tensor) -> bool:
+        """
+        Test if three points are collinear using determinant formula
+        x₁y₂z₃ - x₁y₃z₂ + x₂y₃z₁ - x₃y₂z₁ + x₃y₁z₂ - x₂y₁z₃ = 0
+
+        Args:
+            a1, a2, a3: Points in projective coordinates
+
+        Returns:
+            Boolean indicating if points are collinear
+        """
+        x1, y1, z1 = a1[..., 0], a1[..., 1], a1[..., 2]
+        x2, y2, z2 = a2[..., 0], a2[..., 1], a2[..., 2]
+        x3, y3, z3 = a3[..., 0], a3[..., 1], a3[..., 2]
         
-        # Get midpoints of transformed points
-        m1_trans, m2_trans = self.midpoints(a1_trans, a2_trans)
+        det = x1*y2*z3 - x1*y3*z2 + x2*y3*z1 - x3*y2*z1 + x3*y1*z2 - x2*y1*z3
+        return torch.abs(det) < self.epsilon
+
+    def are_concurrent(self, L1: Tensor, L2: Tensor, L3: Tensor) -> bool:
+        """
+        Test if three lines are concurrent using determinant
+        l₁m₂n₃ - l₁m₃n₂ + l₂m₃n₁ - l₃m₂n₁ + l₃m₁n₂ - l₂m₁n₃ = 0
+
+        Args:
+            L1, L2, L3: Lines in projective coordinates
+
+        Returns:
+            Boolean indicating if lines are concurrent
+        """
+        l1, m1, n1 = L1[..., 0], L1[..., 1], L1[..., 2]
+        l2, m2, n2 = L2[..., 0], L2[..., 1], L2[..., 2]
+        l3, m3, n3 = L3[..., 0], L3[..., 1], L3[..., 2]
         
-        # Transform original midpoints
-        m1_expected = self.transform(m1, matrix)
-        m2_expected = self.transform(m2, matrix)
-        
-        # Verify up to projective equivalence
-        eps = 1e-4
-        m1_match = (torch.allclose(m1_trans, m1_expected, rtol=eps) or 
-                    torch.allclose(m1_trans, -m1_expected, rtol=eps))
-        m2_match = (torch.allclose(m2_trans, m2_expected, rtol=eps) or 
-                    torch.allclose(m2_trans, -m2_expected, rtol=eps))
-                    
-        return m1_match and m2_match
+        det = l1*m2*n3 - l1*m3*n2 + l2*m3*n1 - l3*m2*n1 + l3*m1*n2 - l2*m1*n3
+        return torch.abs(det) < self.epsilon
+
+    def altitude_line(self, a: Tensor, L: Tensor) -> Tensor:
+        """
+        Get altitude line through point a perpendicular to line L
+        Returns aL^⊥
+
+        Args:
+            a: Point in projective coordinates
+            L: Line in projective coordinates
+
+        Returns:
+            Altitude line in projective coordinates
+        """
+        L_perp = torch.stack([L[..., 0], L[..., 1], -L[..., 2]], dim=-1)
+        return self.join(a, L_perp)
+
+    def altitude_point(self, a: Tensor, L: Tensor) -> Tensor:
+        """
+        Get altitude point on L perpendicular to point a
+        Returns a^⊥L
+
+        Args:
+            a: Point in projective coordinates
+            L: Line in projective coordinates
+
+        Returns:
+            Altitude point in projective coordinates
+        """
+        a_perp = torch.stack([a[..., 0], a[..., 1], -a[..., 2]], dim=-1)
+        return self.meet(a_perp, L)
+
+    def parallel_line(self, a: Tensor, L: Tensor) -> Tensor:
+        """
+        Get parallel line through a to line L
+        Returns a(a^⊥L)
+
+        Args:
+            a: Point in projective coordinates
+            L: Line in projective coordinates
+
+        Returns:
+            Parallel line in projective coordinates
+        """
+        alt_point = self.altitude_point(a, L)
+        return self.join(a, alt_point)
+
+    def parallel_point(self, a: Tensor, L: Tensor) -> Tensor:
+        """
+        Get parallel point on a^⊥ to point a on L
+        Returns a^⊥(aL^⊥)
+
+        Args:
+            a: Point in projective coordinates
+            L: Line in projective coordinates
+
+        Returns:
+            Parallel point in projective coordinates
+        """
+        alt_line = self.altitude_line(a, L)
+        a_perp = torch.stack([a[..., 0], a[..., 1], -a[..., 2]], dim=-1)
+        return self.meet(a_perp, alt_line)
