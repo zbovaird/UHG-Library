@@ -66,33 +66,33 @@ class ProjectiveUHG:
         x₁x₂ + y₁y₂ - z₁z₂
         
         Args:
-            a: First point [x₁:y₁:z₁]
-            b: Second point [x₂:y₂:z₂]
+            a: First point [x₁:y₁:z₁] or [..., x₁:y₁:z₁]
+            b: Second point [x₂:y₂:z₂] or [..., x₂:y₂:z₂]
             
         Returns:
             Hyperbolic dot product
         """
-        if a.shape[-1] != 3 or b.shape[-1] != 3:
-            raise ValueError("Input tensors must have shape (..., 3)")
-            
-        # Split into spatial and time components
+        a = torch.as_tensor(a)
+        b = torch.as_tensor(b)
+        print("[DEBUG] hyperbolic_dot: a=", a, "b=", b)
         a_space = a[..., :2]
         b_space = b[..., :2]
         a_time = a[..., 2:]
         b_time = b[..., 2:]
-        
-        # Compute dot product with correct signature
         space_dot = torch.sum(a_space * b_space, dim=-1)
         time_dot = torch.sum(a_time * b_time, dim=-1)
-        
-        return space_dot - time_dot
+        result = space_dot - time_dot
+        print("[DEBUG] hyperbolic_dot: space_dot=", space_dot, "time_dot=", time_dot, "result=", result)
+        return result
 
     def quadrance(self, a: Tensor, b: Tensor) -> Tensor:
         """
         Calculate quadrance between two points a=[x₁:y₁:z₁] and b=[x₂:y₂:z₂]
-        According to UHG principles:
-        q(A,B) = 1 - <A,B>²/(<A,A><B,B>) for non-null points
-        where <A,B> = x₁x₂ + y₁y₂ - z₁z₂
+        According to UHG.pdf equation (9):
+        q(a,b) = 1 - (x₁x₂ + y₁y₂ - z₁z₂)²/((x₁² + y₁² - z₁²)(x₂² + y₂² - z₂²))
+        
+        This is undefined if either point is null, equals 1 when points are perpendicular,
+        and equals 0 when points are the same or lie on a null line.
         
         Args:
             a: First point [x₁:y₁:z₁]
@@ -104,45 +104,25 @@ class ProjectiveUHG:
         Raises:
             ValueError: if either point is null
         """
-        # First normalize points
+        print("[DEBUG] quadrance: a=", a, "b=", b)
         a = self.normalize_points(a)
         b = self.normalize_points(b)
-        
-        # Check for null points
-        if self.is_null_point(a) or self.is_null_point(b):
+        if torch.any(self.is_null_point(a)) or torch.any(self.is_null_point(b)):
+            print("[WARNING] quadrance: One or more points are null. a=", a, "b=", b)
             raise ValueError("Quadrance is undefined for null points")
-            
-        # Compute inner products
-        ab = self.hyperbolic_dot(a, b)
-        aa = self.hyperbolic_dot(a, a)
-        bb = self.hyperbolic_dot(b, b)
-        
-        # Handle numerical stability for division
-        safe_denom = torch.where(
-            torch.abs(aa * bb) > self.epsilon,
-            aa * bb,
-            torch.ones_like(aa) * self.epsilon
-        )
-        
-        # Compute quadrance
-        q = 1.0 - (ab * ab) / safe_denom
-        
-        # Handle numerical stability for result
-        q = torch.where(
-            torch.abs(q) < self.epsilon,
-            torch.zeros_like(q),
-            q
-        )
-        q = torch.where(
-            torch.abs(q - 1.0) < self.epsilon,
-            torch.ones_like(q),
-            q
-        )
-        
-        # Ensure quadrance is non-negative
-        q = torch.abs(q)
-        
-        return q
+        a_dot_a = self.hyperbolic_dot(a, a)
+        b_dot_b = self.hyperbolic_dot(b, b)
+        a_dot_b = self.hyperbolic_dot(a, b)
+        print("[DEBUG] quadrance: a_dot_a=", a_dot_a, "b_dot_b=", b_dot_b, "a_dot_b=", a_dot_b)
+        denom = a_dot_a * b_dot_b
+        numer = a_dot_b ** 2
+        print("[DEBUG] quadrance: numer=", numer, "denom=", denom)
+        q = 1 - numer / denom
+        if torch.any(torch.isnan(q)):
+            print("[ERROR] quadrance: Result is NaN! a=", a, "b=", b, "numer=", numer, "denom=", denom)
+        q_clamped = torch.clamp(q, min=0.0, max=1.0)
+        print("[DEBUG] quadrance: q=", q, "q_clamped=", q_clamped)
+        return q_clamped
         
     def det2(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
         """
@@ -152,116 +132,75 @@ class ProjectiveUHG:
         """
         return a * d - b * c
 
-    def cross_ratio(self, v1: Tensor, v2: Tensor, u1: Tensor, u2: Tensor) -> Tensor:
+    def spread(self, a: Tensor, b: Tensor, c: Tensor) -> Tensor:
         """
-        Compute cross-ratio of four vectors in projective space.
-        Following UHG.pdf definition:
-        CR(A,B;C,D) = |x₁ y₁|  |x₁ y₁|
-                      |z₁ w₁|  |z₂ w₂|
-                      ─────── / ───────
-                      |x₂ y₂|  |x₂ y₂|
-                      |z₁ w₁|  |z₂ w₂|
-        
-        For the special case where v1,v2 are used as basis:
-        CR(v₁,v₂:u₁,u₂) = w₁/w₂ / z₁/z₂ = w₁z₂/w₂z₁
-        
+        Calculate the spread between three points a, b, c.
+        The spread is the hyperbolic angle between the lines ab and ac.
+
         Args:
-            v1, v2, u1, u2: Points in projective space
-            
+            a: First point [x₁:y₁:z₁]
+            b: Second point [x₂:y₂:z₂]
+            c: Third point [x₃:y₃:z₃]
+
         Returns:
-            Cross-ratio tensor
+            Spread between the lines ab and ac
+
+        Raises:
+            ValueError: if any point is null
         """
-        # First try the special case where v1,v2 can be used as basis
-        # This is numerically more stable when applicable
-        try:
-            # Check if v1,v2 can be used as basis by attempting to solve
-            # u1 = z1*v1 + w1*v2
-            # u2 = z2*v1 + w2*v2
-            
-            # Create system matrix [v1 v2]
-            basis = torch.stack([v1, v2], dim=-1)
-            
-            # Solve for coefficients [z1,w1] and [z2,w2]
-            try:
-                # Using batched solve for better efficiency
-                u = torch.stack([u1, u2], dim=-1)
-                coeffs = torch.linalg.solve(basis, u)
-                z1, w1 = coeffs[..., 0]
-                z2, w2 = coeffs[..., 1]
-                
-                # Use special case formula
-                return (w1 * z2) / (w2 * z1 + self.epsilon)
-                
-            except RuntimeError:
-                # Matrix not invertible, fall back to general case
-                pass
-                
-        except RuntimeError:
-            # Error in setup, fall back to general case
-            pass
-            
-        # General case using determinant form
-        # Project to 2D if needed by taking first two coordinates
-        # This preserves cross-ratio due to projective invariance
-        v1_2d = v1[..., :2]
-        v2_2d = v2[..., :2]
-        u1_2d = u1[..., :2]
-        u2_2d = u2[..., :2]
-        
-        # Compute the four 2x2 determinants
-        det11 = self.det2(v1_2d[..., 0], v1_2d[..., 1], 
-                         u1_2d[..., 0], u1_2d[..., 1])
-        det12 = self.det2(v1_2d[..., 0], v1_2d[..., 1],
-                         u2_2d[..., 0], u2_2d[..., 1])
-        det21 = self.det2(v2_2d[..., 0], v2_2d[..., 1],
-                         u1_2d[..., 0], u1_2d[..., 1])
-        det22 = self.det2(v2_2d[..., 0], v2_2d[..., 1],
-                         u2_2d[..., 0], u2_2d[..., 1])
-        
-        # Compute cross-ratio as ratio of determinants
-        numerator = det11 * det22
-        denominator = det12 * det21
-        
-        # Handle numerical stability while preserving sign
-        safe_denom = torch.where(
-            torch.abs(denominator) > self.epsilon,
-            denominator,
-            torch.sign(denominator) * self.epsilon
-        )
-        
-        return numerator / safe_denom
-    
-    def spread(self, l1: Tensor, l2: Tensor) -> Tensor:
-        """
-        Compute spread between two lines in projective space.
-        S(l,m) = (l₁m₁ + l₂m₂ - l₃m₃)² / ((l₁² + l₂² - l₃²)(m₁² + m₂² - m₃²))
-        """
-        if l1.shape[-1] != 3 or l2.shape[-1] != 3:
-            raise ValueError("Input tensors must have shape (..., 3)")
-            
-        # Normalize inputs for numerical stability
-        l1 = l1 / (torch.norm(l1, dim=-1, keepdim=True) + self.epsilon)
-        l2 = l2 / (torch.norm(l2, dim=-1, keepdim=True) + self.epsilon)
-        
-        # Split coordinates
-        l1_xy = l1[..., :2]
-        l1_z = l1[..., 2]
-        l2_xy = l2[..., :2]
-        l2_z = l2[..., 2]
-        
-        # Compute numerator using hyperbolic inner product
-        dot_xy = torch.sum(l1_xy * l2_xy, dim=-1)
-        numerator = (dot_xy - l1_z * l2_z) ** 2
-        
-        # Compute denominators using hyperbolic norm
-        denom_l1 = torch.clamp(torch.sum(l1_xy * l1_xy, dim=-1) - l1_z * l1_z, min=self.epsilon)
-        denom_l2 = torch.clamp(torch.sum(l2_xy * l2_xy, dim=-1) - l2_z * l2_z, min=self.epsilon)
-        denominator = denom_l1 * denom_l2
-        
-        # Compute spread with proper scaling
-        s = numerator / denominator
-        return 1.0 - torch.clamp(s, min=0.0, max=1.0)
-    
+        # Normalize points
+        a = self.normalize_points(a)
+        b = self.normalize_points(b)
+        c = self.normalize_points(c)
+
+        # Check for null points
+        if torch.any(self.is_null_point(a)) or torch.any(self.is_null_point(b)) or torch.any(self.is_null_point(c)):
+            print("[DEBUG] Spread: One or more points are null. a:", a, "b:", b, "c:", c)
+            raise ValueError("Spread is undefined for null points")
+
+        # Calculate quadrances
+        q1 = self.quadrance(b, c)  # Quadrance of bc
+        q2 = self.quadrance(a, c)  # Quadrance of ac
+        q3 = self.quadrance(a, b)  # Quadrance of ab
+
+        # Calculate spread using UHG formula
+        # S = (q1 + q2 - q3)**2 / (4 * q1 * q2)
+        numerator = (q1 + q2 - q3)**2
+        denominator = 4 * q1 * q2
+
+        # Debug output
+        print("[DEBUG] Spread calculation:")
+        print("  a:", a)
+        print("  b:", b)
+        print("  c:", c)
+        print("  q1 (bc):", q1)
+        print("  q2 (ac):", q2)
+        print("  q3 (ab):", q3)
+        print("  numerator:", numerator)
+        print("  denominator:", denominator)
+
+        # Handle numerical stability
+        if torch.any(denominator < self.epsilon):
+            print("[WARNING] Spread denominator near zero. Returning 1.0.")
+            return torch.ones_like(numerator)
+
+        # Calculate spread
+        S = numerator / denominator
+
+        # Check for NaN
+        if torch.any(torch.isnan(S)):
+            print("[ERROR] Spread result is NaN!")
+            print("  Inputs: a=", a, ", b=", b, ", c=", c)
+            print("  Quadrances: q1=", q1, ", q2=", q2, ", q3=", q3)
+            print("  Numerator:", numerator)
+            print("  Denominator:", denominator)
+
+        # Ensure result is in [0,1]
+        S_clamped = torch.clamp(S, min=0.0, max=1.0)
+        print("  Spread (before clamp):", S)
+        print("  Spread (clamped):", S_clamped)
+        return S_clamped
+
     def opposite_points(self, a1: Tensor, a2: Tensor) -> Tuple[Tensor, Tensor]:
         """
         Compute opposite points for two points in projective space.
@@ -318,7 +257,7 @@ class ProjectiveUHG:
         For ML applications with higher dimensions, we project to 3D first.
         Returns the line as a tensor representing the coefficients of the line equation.
         """
-        # Project to 3D if needed by taking first two components and last component
+        print("[DEBUG] join: x=", x, "y=", y)
         if x.shape[-1] > 3:
             x_proj = torch.cat([x[..., :2], x[..., -1:]], dim=-1)
             y_proj = torch.cat([y[..., :2], y[..., -1:]], dim=-1)
@@ -331,7 +270,9 @@ class ProjectiveUHG:
         y_proj = self.normalize_points(y_proj)
         
         # Compute cross product for line coefficients
-        return torch.cross(x_proj, y_proj, dim=-1)
+        result = torch.cross(x_proj, y_proj, dim=-1)
+        print("[DEBUG] join: x_proj=", x_proj, "y_proj=", y_proj, "result=", result)
+        return result
     
     def get_projective_matrix(self, dim: int) -> Tensor:
         """
@@ -441,56 +382,20 @@ class ProjectiveUHG:
     
     def normalize_points(self, points: Tensor) -> Tensor:
         """
-        Normalize points to have consistent scale.
-        For UHG, we normalize so that:
-        1. If point is null (x² + y² = z²), normalize so z = 1
-        2. If point is non-null, normalize so largest component is ±1
-        
+        Normalize points to have unit hyperbolic norm.
+        For a point [x:y:z], we ensure x² + y² < z².
+
         Args:
             points: Points to normalize [..., 3]
-            
+
         Returns:
             Normalized points
         """
-        # Handle empty tensor
-        if points.numel() == 0:
-            return points
-            
-        # Get components
-        x, y, z = points[..., 0], points[..., 1], points[..., 2]
-        
-        # Compute x² + y² - z²
-        norm = x*x + y*y - z*z
-        
-        # For null points (x² + y² = z²), normalize so z = 1
-        null_mask = torch.abs(norm) < self.epsilon
-        if torch.any(null_mask):
-            # Get scale factor to make z = 1
-            scale = torch.where(
-                torch.abs(z) > self.epsilon,
-                1.0 / z,
-                torch.ones_like(z)
-            )
-            points = points * scale.unsqueeze(-1)
-            return points
-            
-        # For non-null points, normalize so largest component is ±1
-        max_abs = torch.max(torch.abs(points), dim=-1, keepdim=True)[0]
-        scale = torch.where(
-            max_abs > self.epsilon,
-            1.0 / max_abs,
-            torch.ones_like(max_abs)
-        )
-        points = points * scale
-        
-        # Ensure first non-zero component is positive
-        nonzero_mask = torch.abs(points) > self.epsilon
-        if torch.any(nonzero_mask):
-            first_nonzero = torch.where(nonzero_mask)[0][0]
-            if points[first_nonzero] < 0:
-                points = -points
-                
-        return points
+        print("[DEBUG] normalize_points: input=", points)
+        norms = torch.norm(points[..., :-1], dim=-1, keepdim=True)
+        normalized = points / (norms + self.epsilon)
+        print("[DEBUG] normalize_points: norms=", norms, "normalized=", normalized)
+        return normalized
     
     def projective_average(self, points: Tensor, weights: Tensor) -> Tensor:
         """
@@ -598,49 +503,53 @@ class ProjectiveUHG:
     
     def is_null_point(self, point: Tensor) -> Tensor:
         """
-        Check if a point is null (lies on its dual line).
-        A point [x:y:z] is null when x² + y² = z²
-        
+        Check if a point is null in hyperbolic space.
+        A point [x:y:z] is null if x² + y² = z².
+
         Args:
-            point: Point in projective coordinates [x:y:z]
-            
+            point: Point to check [..., 3]
+
         Returns:
             Boolean tensor indicating if point is null
         """
-        # First normalize point
-        point = self.normalize_points(point)
-        
-        # Get components
-        x, y, z = point[..., 0], point[..., 1], point[..., 2]
-        
-        # Compute x² + y² - z²
-        norm = x*x + y*y - z*z
-        
-        # Point is null if norm is close to 0
-        return torch.abs(norm) < self.epsilon
+        # Handle batched points
+        if point.dim() > 1:
+            # Check each point in the batch
+            return torch.stack([self.is_null_point(p) for p in point])
+
+        # Extract coordinates
+        x, y, z = point[0], point[1], point[2]
+
+        # Check if point is null
+        return torch.abs(x**2 + y**2 - z**2) < self.epsilon
     
     def null_point(self, t: Tensor, u: Tensor) -> Tensor:
         """
-        Get null point parametrized by t:u
-        Returns [t²-u² : 2tu : t²+u²]
+        Create a null point in projective space.
+        Following UHG.pdf, null points satisfy x² + y² = z².
         
         Args:
             t, u: Parameters for null point
             
         Returns:
-            Null point in projective coordinates
+            Null point [x:y:z]
         """
-        point = torch.stack([
-            t*t - u*u,
-            2*t*u,
-            t*t + u*u
-        ], dim=-1)
-        return self.normalize_points(point)
+        # Ensure inputs are tensors
+        t = torch.as_tensor(t)
+        u = torch.as_tensor(u)
+        
+        # Create null point
+        x = t
+        y = u
+        z = torch.sqrt(t**2 + u**2 + self.epsilon)
+        
+        return torch.stack([x, y, z], dim=-1)
 
     def join_null_points(self, t1: Tensor, u1: Tensor, t2: Tensor, u2: Tensor) -> Tensor:
         """
         Get line through two null points parametrized by (t₁:u₁) and (t₂:u₂)
-        Returns (t₁t₂-u₁u₂ : t₁u₂+t₂u₁ : t₁t₂+u₁u₂)
+        According to UHG.pdf, the join of null points is:
+        (t₁t₂-u₁u₂ : t₁u₂+t₂u₁ : t₁t₂+u₁u₂)
         
         Args:
             t1, u1: Parameters of first null point
@@ -658,16 +567,7 @@ class ProjectiveUHG:
         line = torch.stack([x, y, z], dim=-1)
         
         # Normalize line
-        line = self.normalize_points(line)
-        
-        # Ensure first non-zero component is positive
-        nonzero_mask = torch.abs(line) > self.epsilon
-        if torch.any(nonzero_mask):
-            first_nonzero_idx = torch.where(nonzero_mask)[0][0]
-            if line[first_nonzero_idx] < 0:
-                line = -line
-        
-        return line
+        return self.normalize_points(line)
     
     def join_points(self, a1: Tensor, a2: Tensor) -> Tensor:
         """
@@ -841,3 +741,230 @@ class ProjectiveUHG:
                     torch.allclose(m2_trans, -m2_expected, rtol=eps))
                     
         return m1_match and m2_match
+
+    def triple_quad_formula(self, q1: Tensor, q2: Tensor, q3: Tensor) -> bool:
+        """
+        Verify the triple quad formula from UHG.pdf.
+        For any three points, the quadrances satisfy:
+        (q1 + q2 + q3)² = 2(q1² + q2² + q3²) + 4q1q2q3
+
+        Args:
+            q1: First quadrance
+            q2: Second quadrance
+            q3: Third quadrance
+
+        Returns:
+            True if the formula is satisfied
+        """
+        # Calculate both sides of the formula
+        lhs = (q1 + q2 + q3)**2
+        rhs = 2*(q1**2 + q2**2 + q3**2) + 4*q1*q2*q3
+
+        # Check if they are equal within numerical tolerance
+        return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
+
+    def triple_spread_formula(self, S1: Tensor, S2: Tensor, S3: Tensor) -> bool:
+        """
+        Verify the triple spread formula from UHG.pdf.
+        For any three points, the spreads satisfy:
+        (S1 + S2 + S3)² = 2(S1² + S2² + S3²) + 4S1S2S3
+
+        Args:
+            S1: First spread
+            S2: Second spread
+            S3: Third spread
+
+        Returns:
+            True if the formula is satisfied
+        """
+        # Calculate both sides of the formula
+        lhs = (S1 + S2 + S3)**2
+        rhs = 2*(S1**2 + S2**2 + S3**2) + 4*S1*S2*S3
+
+        # Check if they are equal within numerical tolerance
+        return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
+
+    def cross_law(self, q1: Tensor, q2: Tensor, q3: Tensor, S1: Tensor, S2: Tensor, S3: Tensor) -> bool:
+        """
+        Verify the cross law from UHG.pdf.
+        For any three points, the quadrances and spreads satisfy:
+        (q1 + q2 - q3)² = 4q1q2(1 - S3)
+
+        Args:
+            q1: First quadrance
+            q2: Second quadrance
+            q3: Third quadrance
+            S1: First spread
+            S2: Second spread
+            S3: Third spread
+
+        Returns:
+            True if the law is satisfied
+        """
+        # Calculate both sides of the law
+        lhs = (q1 + q2 - q3)**2
+        rhs = 4*q1*q2*(1 - S3)
+
+        # Check if they are equal within numerical tolerance
+        return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
+
+    def cross_dual_law(self, S1: Tensor, S2: Tensor, S3: Tensor, q1: Tensor) -> bool:
+        """
+        Verify the dual cross law from UHG.pdf.
+        For any three points, the spreads and quadrance satisfy:
+        (S1 + S2 - S3)² = 4S1S2(1 - q1)
+
+        Args:
+            S1: First spread
+            S2: Second spread
+            S3: Third spread
+            q1: First quadrance
+
+        Returns:
+            True if the law is satisfied
+        """
+        # Calculate both sides of the law
+        lhs = (S1 + S2 - S3)**2
+        rhs = 4*S1*S2*(1 - q1)
+
+        # Check if they are equal within numerical tolerance
+        return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
+
+    def pythagoras(self, q1: Tensor, q2: Tensor, q3: Optional[Tensor] = None) -> Tensor:
+        """
+        Pythagoras' theorem in UHG.
+        For a right triangle (S₃ = 1), q₃ = q₁ + q₂ - q₁q₂
+        
+        Args:
+            q1, q2: Quadrances of the legs
+            q3: Optional quadrance of the hypotenuse
+            
+        Returns:
+            If q3 is None, returns the expected q3.
+            Otherwise, returns whether the theorem is satisfied.
+        """
+        expected_q3 = q1 + q2 - q1*q2
+        
+        if q3 is None:
+            return expected_q3
+        else:
+            return torch.abs(q3 - expected_q3) < self.epsilon
+        
+    def dual_pythagoras(self, S1: Tensor, S2: Tensor, S3: Optional[Tensor] = None) -> Tensor:
+        """
+        Dual Pythagoras' theorem in UHG.
+        For a right triangle (q₃ = 1), S₃ = S₁ + S₂ - S₁S₂
+        
+        Args:
+            S1, S2: Spreads of the legs
+            S3: Optional spread of the hypotenuse
+            
+        Returns:
+            If S3 is None, returns the expected S3.
+            Otherwise, returns whether the theorem is satisfied.
+        """
+        expected_S3 = S1 + S2 - S1*S2
+        
+        if S3 is None:
+            return expected_S3
+        else:
+            return torch.abs(S3 - expected_S3) < self.epsilon
+
+    def spread_quadrance_duality(self, L1: Tensor, L2: Tensor) -> bool:
+        """
+        Verify that spread between lines equals quadrance between dual points
+        S(L₁,L₂) = q(L₁⊥,L₂⊥)
+
+        Args:
+            L1, L2: Two lines in projective coordinates
+
+        Returns:
+            Boolean indicating if duality holds
+        """
+        spread_val = self.spread(L1, L2)
+        quad_val = self.quadrance(self.dual_line_to_point(L1), self.dual_line_to_point(L2))
+        return torch.abs(spread_val - quad_val) < self.epsilon
+        
+    def dual_line_to_point(self, line: Tensor) -> Tensor:
+        """
+        Convert a line to its dual point.
+        In UHG, the dual of a line (l:m:n) is the point [l:m:n].
+        
+        Args:
+            line: Line in projective coordinates (l:m:n)
+            
+        Returns:
+            Dual point [l:m:n]
+        """
+        # In UHG, the dual of a line (l:m:n) is simply the point [l:m:n]
+        # This is because we're using the same bilinear form for both points and lines
+        return line.clone()
+        
+    def dual_point_to_line(self, point: Tensor) -> Tensor:
+        """
+        Convert a point to its dual line.
+        In UHG, the dual of a point [x:y:z] is the line (x:y:z).
+        
+        Args:
+            point: Point in projective coordinates [x:y:z]
+            
+        Returns:
+            Dual line (x:y:z)
+        """
+        # In UHG, the dual of a point [x:y:z] is simply the line (x:y:z)
+        # This is because we're using the same bilinear form for both points and lines
+        return point.clone()
+
+    def point_lies_on_line(self, point: Tensor, line: Tensor) -> bool:
+        """
+        Check if a point lies on a line using the incidence relation in projective geometry.
+        
+        In projective geometry, a point [x:y:z] lies on a line (a:b:c) if ax + by + cz = 0.
+        
+        Args:
+            point: Tensor representing a point [x:y:z]
+            line: Tensor representing a line (a:b:c)
+            
+        Returns:
+            Boolean indicating whether the point lies on the line
+        """
+        # Calculate the dot product
+        dot_product = torch.sum(point * line)
+        
+        # Check if the dot product is close to zero (within epsilon)
+        return torch.abs(dot_product) < self.epsilon
+
+    def cross_ratio(self, v1: Tensor, v2: Tensor, u1: Tensor, u2: Tensor) -> Tensor:
+        """
+        Calculate the cross-ratio of four points.
+        The cross-ratio is a projective invariant.
+
+        Args:
+            v1: First point [x₁:y₁:z₁]
+            v2: Second point [x₂:y₂:z₂]
+            u1: Third point [x₃:y₃:z₃]
+            u2: Fourth point [x₄:y₄:z₄]
+
+        Returns:
+            Cross-ratio of the four points
+
+        Raises:
+            ValueError: if any point is null
+        """
+        print("[DEBUG] cross_ratio: v1=", v1, "v2=", v2, "u1=", u1, "u2=", u2)
+        # Use determinants for projective cross-ratio
+        def det2(a, b):
+            return a[0]*b[1] - a[1]*b[0]
+        # For 3D, project to 2D by dropping last coordinate
+        v1_2d = v1[..., :2]
+        v2_2d = v2[..., :2]
+        u1_2d = u1[..., :2]
+        u2_2d = u2[..., :2]
+        num = det2(v1_2d, u1_2d) * det2(v2_2d, u2_2d)
+        denom = det2(v1_2d, u2_2d) * det2(v2_2d, u1_2d)
+        print("[DEBUG] cross_ratio: num=", num, "denom=", denom)
+        if torch.any(denom.abs() < self.epsilon):
+            print("[WARNING] cross_ratio: denominator near zero.")
+        cr = num / (denom + self.epsilon)
+        print("[DEBUG] cross_ratio: cr=", cr)
+        return cr

@@ -215,5 +215,48 @@ def test_save_load():
     # Clean up
     os.remove('test_model.pt')
 
+def test_spread_simple_points():
+    """Test spread calculation with simple points."""
+    config = UHGMetricConfig(feature_dim=3)
+    model = UHGMetricLearner(config)
+    
+    # Create simple points in projective space
+    a = torch.tensor([1.0, 0.0, 0.0, 1.0])  # [1:0:0:1]
+    b = torch.tensor([0.0, 1.0, 0.0, 1.0])  # [0:1:0:1]
+    c = torch.tensor([0.0, 0.0, 1.0, 1.0])  # [0:0:1:1]
+    
+    # Calculate spread
+    spread = model.uhg.spread(a, b, c)
+    
+    # Print intermediate values for debugging
+    print(f"Points:")
+    print(f"a: {a}")
+    print(f"b: {b}")
+    print(f"c: {c}")
+    
+    # Calculate quadrances
+    q1 = model.uhg.quadrance(b, c)
+    q2 = model.uhg.quadrance(a, c)
+    q3 = model.uhg.quadrance(a, b)
+    
+    print(f"\nQuadrances:")
+    print(f"q1 (bc): {q1}")
+    print(f"q2 (ac): {q2}")
+    print(f"q3 (ab): {q3}")
+    
+    # Calculate spread components
+    numerator = (q1 + q2 - q3)**2
+    denominator = 4 * q1 * q2
+    
+    print(f"\nSpread components:")
+    print(f"numerator: {numerator}")
+    print(f"denominator: {denominator}")
+    print(f"spread: {spread}")
+    
+    # Basic assertions
+    assert not torch.isnan(spread)
+    assert spread >= 0.0
+    assert spread <= 1.0
+
 if __name__ == '__main__':
     pytest.main([__file__]) 

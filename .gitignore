@@ -49,3 +49,5 @@ implementations/
 docs/_build/
 docs/api/_build/
 *.pdf
+# Use cases directory
+use_cases/

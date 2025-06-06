@@ -126,3 +126,17 @@ class UHGCore:
         # Compute distance using cross-ratio
         cr = self.uhg.cross_ratio(p1, p2, i1, i2)
         return torch.abs(torch.log(cr))
+    
+    def spread(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the spread (hyperbolic angle) between three points.
+        Delegates to ProjectiveUHG's spread method.
+        """
+        return self.uhg.spread(a, b, c)
+    
+    def quadrance(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the quadrance between two points.
+        Delegates to ProjectiveUHG's quadrance method.
+        """
+        return self.uhg.quadrance(a, b)

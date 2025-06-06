@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from uhg.core import UHGCore
 
 @dataclass
 class UHGMetricConfig:
@@ -29,6 +30,9 @@ class UHGMetricLearner(nn.Module):
         """Initialize UHG metric learner."""
         super().__init__()
         self.config = config
+        
+        # Initialize UHG core
+        self.uhg = UHGCore()
         
         # Initialize projective transformation parameters
         self.proj_matrix = nn.Parameter(

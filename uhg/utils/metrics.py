@@ -1,67 +1,92 @@
 """UHG-specific metrics and evaluation utilities."""
 
 import torch
+import torch.nn.functional as F
+from typing import Optional
 
 def uhg_inner_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Compute UHG inner product between points.
+    """
+    Compute the hyperbolic inner product between two points in projective space.
+    
+    This function is fully vectorized and handles arbitrary batch dimensions.
+    The hyperbolic inner product is defined as:
+    <a,b> = a[..., :-1] @ b[..., :-1].T - a[..., -1] * b[..., -1]
     
     Args:
-        a: First point tensor of shape [..., D+1]
-        b: Second point tensor of shape [..., D+1]
+        a: First point tensor of shape (..., D+1) with homogeneous coordinates
+        b: Second point tensor of shape (..., D+1) with homogeneous coordinates
         
     Returns:
-        Inner product value(s)
+        Hyperbolic inner product of shape (...)
     """
-    return torch.sum(a[..., :-1] * b[..., :-1], dim=-1) - a[..., -1] * b[..., -1]
+    # Handle broadcasting for different batch dimensions
+    # Compute spatial dot product for all dimensions except the last
+    spatial_dot = torch.sum(a[..., :-1] * b[..., :-1], dim=-1)
+    
+    # Compute time component product
+    time_product = a[..., -1] * b[..., -1]
+    
+    # Return hyperbolic inner product
+    return spatial_dot - time_product
 
 def uhg_norm(a: torch.Tensor) -> torch.Tensor:
-    """Compute UHG norm of points.
+    """
+    Compute the hyperbolic norm of points in projective space.
     
     Args:
-        a: Point tensor of shape [..., D+1]
+        a: Point tensor of shape (..., D+1) with homogeneous coordinates
         
     Returns:
-        Norm value(s)
+        Hyperbolic norm of shape (...)
     """
-    return torch.sum(a[..., :-1] ** 2, dim=-1) - a[..., -1] ** 2
+    return torch.sqrt(torch.abs(uhg_inner_product(a, a)))
 
 def uhg_quadrance(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
-    """Compute UHG quadrance between points.
+    """
+    Compute UHG quadrance between two points.
+    
+    This is a fundamental operation in UHG that measures the hyperbolic
+    distance between points without using tangent space operations.
     
     Args:
-        a: First point tensor of shape [..., D+1]
-        b: Second point tensor of shape [..., D+1]
+        a: First point tensor of shape (..., D+1)
+        b: Second point tensor of shape (..., D+1)
         eps: Small value for numerical stability
         
     Returns:
-        Quadrance value(s)
+        Quadrance between points a and b of shape (...)
     """
     dot_product = uhg_inner_product(a, b)
-    norm_a = uhg_norm(a)
-    norm_b = uhg_norm(b)
-    denom = norm_a * norm_b
-    denom = torch.clamp(denom.abs(), min=eps)
-    quadrance = 1 - (dot_product ** 2) / denom
-    return quadrance
+    denom_a = uhg_inner_product(a, a)
+    denom_b = uhg_inner_product(b, b)
+    
+    # Ensure numerical stability
+    denom = torch.clamp(denom_a * denom_b, min=eps)
+    
+    return 1 - (dot_product * dot_product) / denom
 
 def uhg_spread(L: torch.Tensor, M: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
-    """Compute UHG spread between lines.
+    """
+    Compute UHG spread between two lines.
+    
+    Spread is the hyperbolic analog of angle between lines.
     
     Args:
-        L: First line tensor of shape [..., D+1]
-        M: Second line tensor of shape [..., D+1]
+        L: First line tensor of shape (..., D+1)
+        M: Second line tensor of shape (..., D+1)
         eps: Small value for numerical stability
         
     Returns:
-        Spread value(s)
+        Spread between lines L and M of shape (...)
     """
     dot_product = uhg_inner_product(L, M)
-    norm_L = uhg_norm(L)
-    norm_M = uhg_norm(M)
-    denom = norm_L * norm_M
-    denom = torch.clamp(denom.abs(), min=eps)
-    spread = 1 - (dot_product ** 2) / denom
-    return spread
+    denom_L = uhg_inner_product(L, L)
+    denom_M = uhg_inner_product(M, M)
+    
+    # Ensure numerical stability
+    denom = torch.clamp(denom_L * denom_M, min=eps)
+    
+    return 1 - (dot_product * dot_product) / denom
 
 def check_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor, 
                      threshold: float = 1e-5) -> bool:

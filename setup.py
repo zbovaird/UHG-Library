@@ -14,7 +14,7 @@ def get_version():
 
 setup(
     name="uhg",
-    version="0.3.2",
+    version="0.3.4",
     packages=find_packages(),
     install_requires=[
         "torch>=1.8.0",
@@ -38,7 +38,11 @@ setup(
     description="Universal Hyperbolic Geometry Library",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/uhg-library/uhg",
+    url="https://github.com/zachbovaird/UHG-Library",
+    project_urls={
+        "Bug Tracker": "https://github.com/zachbovaird/UHG-Library/issues",
+        "Source Code": "https://github.com/zachbovaird/UHG-Library"
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",

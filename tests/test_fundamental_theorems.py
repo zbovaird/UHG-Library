@@ -99,6 +99,108 @@ def test_cross_dual_law():
     # Verify cross dual law
     assert uhg.cross_dual_law(S1, S2, S3, q1), "Cross dual law should hold for triangle"
 
+def test_triple_spread_formula():
+    """Test the triple spread formula with non-null lines forming a triangle"""
+    uhg = ProjectiveUHG(epsilon=1e-5)  # Increased epsilon for numerical stability
+    
+    # Create three non-null points forming a triangle
+    p1 = torch.tensor([2.0, 0.0, 1.0])  # [2:0:1]
+    p2 = torch.tensor([0.0, 2.0, 1.0])  # [0:2:1]
+    p3 = torch.tensor([2.0, 2.0, 2.0])  # [1:1:1]
+    
+    # Get lines of triangle
+    L1 = uhg.join(p2, p3)
+    L2 = uhg.join(p3, p1)
+    L3 = uhg.join(p1, p2)
+    
+    # Calculate spreads
+    S1 = uhg.spread(L2, L3)
+    S2 = uhg.spread(L3, L1)
+    S3 = uhg.spread(L1, L2)
+    
+    print(f"Triangle spreads: S1={S1}, S2={S2}, S3={S3}")
+    
+    # Verify triple spread formula
+    assert uhg.triple_spread_formula(S1, S2, S3), "Triple spread formula should hold for triangle"
+
+def test_cross_law():
+    """Test the cross law with non-null triangle"""
+    uhg = ProjectiveUHG(epsilon=1e-5)
+    
+    # Create three non-null points forming a triangle
+    p1 = torch.tensor([2.0, 0.0, 1.0])  # [2:0:1]
+    p2 = torch.tensor([0.0, 2.0, 1.0])  # [0:2:1]
+    p3 = torch.tensor([2.0, 2.0, 2.0])  # [1:1:1]
+    
+    # Get lines of triangle
+    L1 = uhg.join(p2, p3)
+    L2 = uhg.join(p3, p1)
+    L3 = uhg.join(p1, p2)
+    
+    # Calculate quadrances and spreads
+    q1 = uhg.quadrance(p2, p3)
+    q2 = uhg.quadrance(p3, p1)
+    q3 = uhg.quadrance(p1, p2)
+    
+    S1 = uhg.spread(L2, L3)
+    S2 = uhg.spread(L3, L1)
+    S3 = uhg.spread(L1, L2)
+    
+    print(f"Triangle quadrances: q1={q1}, q2={q2}, q3={q3}")
+    print(f"Triangle spreads: S1={S1}, S2={S2}, S3={S3}")
+    
+    # Verify cross law
+    assert uhg.cross_law(q1, q2, q3, S1, S2, S3), "Cross law should hold for triangle"
+
+def test_spread_quadrance_duality():
+    """Test the duality between spread and quadrance"""
+    uhg = ProjectiveUHG(epsilon=1e-5)
+    
+    # Create two lines
+    L1 = torch.tensor([1.0, 0.0, 0.0])  # x = 0 (y-axis)
+    L2 = torch.tensor([0.0, 1.0, 0.0])  # y = 0 (x-axis)
+    
+    # Get dual points
+    p1 = uhg.dual_line_to_point(L1)
+    p2 = uhg.dual_line_to_point(L2)
+    
+    # Calculate spread between lines and quadrance between dual points
+    spread_val = uhg.spread(L1, L2)
+    quad_val = uhg.quadrance(p1, p2)
+    
+    print(f"Spread between lines: {spread_val}")
+    print(f"Quadrance between dual points: {quad_val}")
+    
+    # Verify duality
+    assert uhg.spread_quadrance_duality(L1, L2), "Spread-quadrance duality should hold"
+    
+    # Test with another pair of lines
+    L3 = torch.tensor([1.0, 1.0, 0.0])  # x + y = 0
+    L4 = torch.tensor([1.0, -1.0, 0.0])  # x - y = 0
+    
+    # Verify duality for second pair
+    assert uhg.spread_quadrance_duality(L3, L4), "Spread-quadrance duality should hold for second pair"
+
+def test_dual_pythagoras():
+    """Test dual Pythagorean theorem with right-angled triangle"""
+    uhg = ProjectiveUHG(epsilon=1e-5)
+    
+    # Create three lines forming a right triangle
+    # Using lines that form a right triangle
+    L1 = torch.tensor([1.0, 0.0, 0.0])  # x = 0 (y-axis)
+    L2 = torch.tensor([0.0, 1.0, 0.0])  # y = 0 (x-axis)
+    L3 = torch.tensor([1.0, 1.0, 1.0])  # x + y = z
+    
+    # Calculate spreads
+    S1 = uhg.spread(L1, L3)  # spread between y-axis and x+y=z
+    S2 = uhg.spread(L2, L3)  # spread between x-axis and x+y=z
+    S3 = uhg.spread(L1, L2)  # spread between x-axis and y-axis (should be 1 for perpendicular lines)
+    
+    print(f"Right triangle spreads: S1={S1}, S2={S2}, S3={S3}")
+    
+    # Verify dual Pythagorean theorem
+    assert uhg.dual_pythagoras(S1, S2, S3), "Dual Pythagorean theorem should hold for right triangle"
+
 def test_point_lies_on_line():
     """Test point-line incidence with non-null point and line"""
     uhg = ProjectiveUHG(epsilon=1e-5)

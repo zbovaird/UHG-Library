@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2024-06-19
+### Changed
+- Re-release of 0.3.3 with identical features and fixes, due to PyPI versioning requirements.
+
+## [0.3.3] - 2024-06-19
+### Added
+- Robust UHG optimizers: UHGSGD, UHGAdam, and base optimizer with full tangent space and manifold projection logic.
+- Exponential map and tangent projection utilities for hyperbolic optimization.
+- Extensive unit tests for all optimizers, including convergence and geometric invariants.
+
+### Fixed
+- Numerical stability in optimizer steps and projections.
+- Manifold constraint checks for all parameter updates.
+- Improved test reliability and optimizer convergence.
+
+### Changed
+- Updated optimizer API to use parameter group defaults and improved extensibility.
+- Documentation and code comments for optimizer logic.
+
 ## [0.2.4] - 2024-03-19
 
 ### Fixed

@@ -5,7 +5,7 @@ This library provides a pure implementation of UHG principles using projective g
 without relying on differential geometry or manifold concepts.
 """
 
-__version__: str = "0.3.2"
+__version__: str = "0.3.4"
 from typing import List
 
 from .projective import ProjectiveUHG
