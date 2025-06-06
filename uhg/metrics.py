@@ -144,4 +144,8 @@ class UHGMetric:
         denominator = (norm_v + self.eps)
         
         # Compute logarithmic map
-        return v * (d / denominator) 
+        return v * (d / denominator)
+
+def hyperbolic_distance(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """Top-level function for hyperbolic distance for test imports."""
+    return UHGMetric().hyperbolic_distance(x, y) 

@@ -1,226 +1,110 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, Union, Callable
-from ..manifolds.base import Manifold
-from ..utils.cross_ratio import compute_cross_ratio, preserve_cross_ratio
+from typing import Optional, Tuple, Union
+
+from ..manifolds import HyperbolicManifold
 
 class HyperbolicMessagePassing(nn.Module):
-    """Message passing in hyperbolic space using UHG principles.
+    """Hyperbolic message passing layer.
     
-    All operations are performed directly in hyperbolic space without
-    tangent space mappings. Cross-ratios are preserved throughout.
+    This layer implements message passing in hyperbolic space, where messages are
+    computed in the tangent space and then projected back to the hyperbolic manifold.
+    Supports edge features of arbitrary dimension by projecting them to the output dimension if needed.
     
-    Args:
-        manifold (Manifold): The hyperbolic manifold to operate on
-        aggr (str): The aggregation scheme ('add', 'mean', or 'max')
-        flow (str): Message passing flow direction ('source_to_target' or 'target_to_source')
+    Attributes:
+        manifold (HyperbolicManifold): The hyperbolic manifold instance
+        in_channels (int): Number of input features
+        out_channels (int): Number of output features
+        aggr (str): Aggregation method ('mean', 'sum', or 'max')
     """
+    
     def __init__(
         self,
-        manifold: Manifold,
-        aggr: str = 'mean',
-        flow: str = 'source_to_target'
-    ) -> None:
+        manifold: HyperbolicManifold,
+        in_channels: int,
+        out_channels: int,
+        aggr: str = 'mean'
+    ):
         super().__init__()
+        
         self.manifold = manifold
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         self.aggr = aggr
-        self.flow = flow
         
-    def message(
-        self,
-        x_i: torch.Tensor,
-        x_j: torch.Tensor,
-        edge_attr: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """Construct messages in hyperbolic space.
+        # Message transformation
+        self.msg_mlp = nn.Sequential(
+            nn.Linear(in_channels, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
         
-        Args:
-            x_i: Features of target nodes
-            x_j: Features of source nodes
-            edge_attr: Optional edge features
-            
-        Returns:
-            Messages in hyperbolic space
-        """
-        # Compute messages directly in hyperbolic space
-        msg = self.manifold.mobius_add(x_j, -x_i)
+        # Update transformation
+        self.update_mlp = nn.Sequential(
+            nn.Linear(out_channels, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
         
-        if edge_attr is not None:
-            # Include edge features while preserving hyperbolic structure
-            msg = self.manifold.mobius_matvec(edge_attr, msg)
-            
-        return msg
-        
-    def aggregate(
-        self,
-        messages: torch.Tensor,
-        edge_index: torch.Tensor,
-        dim_size: Optional[int] = None
-    ) -> torch.Tensor:
-        """Aggregate messages in hyperbolic space.
-        
-        Args:
-            messages: Messages to aggregate
-            edge_index: Graph connectivity
-            dim_size: Output dimension size
-            
-        Returns:
-            Aggregated messages in hyperbolic space
-        """
-        # Aggregate while preserving hyperbolic structure
-        if self.aggr == 'add':
-            return self._hyperbolic_add(messages, edge_index, dim_size)
-        elif self.aggr == 'mean':
-            return self._hyperbolic_mean(messages, edge_index, dim_size)
-        elif self.aggr == 'max':
-            return self._hyperbolic_max(messages, edge_index, dim_size)
-        else:
-            raise ValueError(f"Unknown aggregation type: {self.aggr}")
-            
-    def _hyperbolic_add(
-        self,
-        messages: torch.Tensor,
-        edge_index: torch.Tensor,
-        dim_size: Optional[int] = None
-    ) -> torch.Tensor:
-        """Hyperbolic addition aggregation."""
-        # Perform addition directly in hyperbolic space
-        if dim_size is None:
-            dim_size = edge_index[1].max().item() + 1
-            
-        out = torch.zeros((dim_size,) + messages.shape[1:],
-                         device=messages.device)
-                         
-        index = edge_index[1] if self.flow == 'source_to_target' else edge_index[0]
-        
-        # Iterative hyperbolic addition to maintain structure
-        for i in range(messages.shape[0]):
-            out[index[i]] = self.manifold.mobius_add(
-                out[index[i]], messages[i])
-                
-        return out
-        
-    def _hyperbolic_mean(
-        self,
-        messages: torch.Tensor,
-        edge_index: torch.Tensor,
-        dim_size: Optional[int] = None
-    ) -> torch.Tensor:
-        """Hyperbolic mean aggregation."""
-        # First compute sum
-        total = self._hyperbolic_add(messages, edge_index, dim_size)
-        
-        # Count number of messages per node
-        if dim_size is None:
-            dim_size = edge_index[1].max().item() + 1
-            
-        index = edge_index[1] if self.flow == 'source_to_target' else edge_index[0]
-        ones = torch.ones(messages.shape[0], device=messages.device)
-        count = torch.zeros(dim_size, device=messages.device)
-        count.scatter_add_(0, index, ones)
-        
-        # Apply scaling in hyperbolic space
-        count = count.clamp(min=1)
-        scale = 1.0 / count.view(-1, 1)
-        return self.manifold.mobius_scalar_mul(scale, total)
-        
-    def _hyperbolic_max(
-        self,
-        messages: torch.Tensor,
-        edge_index: torch.Tensor,
-        dim_size: Optional[int] = None
-    ) -> torch.Tensor:
-        """Hyperbolic max aggregation."""
-        # Use hyperbolic distance to find maximum
-        if dim_size is None:
-            dim_size = edge_index[1].max().item() + 1
-            
-        index = edge_index[1] if self.flow == 'source_to_target' else edge_index[0]
-        
-        out = torch.zeros((dim_size,) + messages.shape[1:],
-                         device=messages.device)
-                         
-        # For each node, find message with maximum hyperbolic norm
-        for i in range(dim_size):
-            mask = index == i
-            if not mask.any():
-                continue
-                
-            node_messages = messages[mask]
-            norms = self.manifold.norm(node_messages)
-            max_idx = torch.argmax(norms)
-            out[i] = node_messages[max_idx]
-            
-        return out
-        
-    def update(
-        self,
-        aggr_out: torch.Tensor,
-        x: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """Update node embeddings with aggregated messages.
-        
-        Args:
-            aggr_out: Aggregated messages
-            x: Optional input node features
-            
-        Returns:
-            Updated node embeddings
-        """
-        if x is None:
-            return aggr_out
-            
-        # Combine while preserving cross-ratio
-        x_adj, aggr_adj = self.preserve_cross_ratio(x, aggr_out)
-        return self.manifold.mobius_add(x_adj, aggr_adj)
-        
-    def preserve_cross_ratio(
+        # Edge feature projection (initialized lazily)
+        self.edge_mlp = None
+    
+    def forward(
         self,
         x: torch.Tensor,
-        y: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Ensure transformations preserve the cross-ratio.
-        
-        Args:
-            x: First tensor
-            y: Second tensor
-            
-        Returns:
-            Tuple of tensors with preserved cross-ratio
-        """
-        cr_before = compute_cross_ratio(x, y)
-        x_adj, y_adj = preserve_cross_ratio(x, y, cr_before)
-        return x_adj, y_adj
-        
-    def propagate(
-        self,
         edge_index: torch.Tensor,
-        x: Optional[torch.Tensor] = None,
-        edge_attr: Optional[torch.Tensor] = None,
-        size: Optional[Tuple[int, int]] = None
+        edge_attr: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        """The main entry point for message passing.
+        """Forward pass of the hyperbolic message passing layer.
         
         Args:
-            edge_index: Graph connectivity
-            x: Node features
-            edge_attr: Optional edge features
-            size: Optional output size
+            x (torch.Tensor): Node features of shape [N, in_channels]
+            edge_index (torch.Tensor): Graph connectivity in COO format with shape [2, E]
+            edge_attr (torch.Tensor, optional): Edge features of shape [E, edge_dim]
             
         Returns:
-            Updated node embeddings
+            torch.Tensor: Updated node features of shape [N, out_channels]
         """
-        dim_size = size[1] if size is not None else None
-        
-        # Get source and target node features
-        x_i = x[edge_index[1]] if x is not None else None
-        x_j = x[edge_index[0]] if x is not None else None
+        # Project node features to tangent space
+        x_tangent = self.manifold.logmap0(x)
         
         # Compute messages
-        messages = self.message(x_i, x_j, edge_attr)
+        row, col = edge_index
+        messages = self.msg_mlp(x_tangent[col])
+        
+        # Add edge features if provided
+        if edge_attr is not None:
+            if edge_attr.shape[-1] != self.out_channels:
+                # Lazily initialize edge_mlp if needed
+                if self.edge_mlp is None or self.edge_mlp.in_features != edge_attr.shape[-1]:
+                    self.edge_mlp = nn.Linear(edge_attr.shape[-1], self.out_channels).to(edge_attr.device)
+                edge_proj = self.edge_mlp(edge_attr)
+            else:
+                edge_proj = edge_attr
+            messages = messages + edge_proj
         
         # Aggregate messages
-        aggr_out = self.aggregate(messages, edge_index, dim_size)
+        if self.aggr == 'mean':
+            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
+            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages)
+            count = torch.zeros(x.size(0), device=x.device)
+            count.scatter_add_(0, row, torch.ones_like(row, dtype=torch.float))
+            out = out / (count.unsqueeze(-1) + 1e-8)
+        elif self.aggr == 'sum':
+            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
+            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages)
+        elif self.aggr == 'max':
+            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
+            out.scatter_reduce_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages, reduce='amax')
+        else:
+            raise ValueError(f"Unknown aggregation method: {self.aggr}")
         
-        # Update node embeddings
-        return self.update(aggr_out, x) 
+        # Update node features
+        out = self.update_mlp(out)
+        
+        # Project back to hyperbolic space
+        return self.manifold.expmap0(out)
+    
+    def extra_repr(self) -> str:
+        """Extra representation string."""
+        return f'in_channels={self.in_channels}, out_channels={self.out_channels}, aggr={self.aggr}' 
