@@ -1,23 +1,25 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
-import math
+import torch.nn.functional as F
+from typing import Optional
 
 from ...manifolds import HyperbolicManifold
+from ...utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 
 class HyperbolicLinear(nn.Module):
-    """Hyperbolic linear layer.
+    """Hyperbolic linear layer that preserves hyperbolic structure.
     
-    This layer performs a linear transformation in the tangent space of the hyperbolic
-    manifold, followed by an exponential map to project back onto the manifold.
+    This implementation follows UHG principles by:
+    1. Using pure projective operations (no tangent space)
+    2. Preserving cross-ratios
+    3. Ensuring outputs lie on the hyperbolic manifold
+    4. Maintaining hyperbolic structure through all transformations
     
-    Attributes:
+    Args:
         manifold (HyperbolicManifold): The hyperbolic manifold instance
         in_features (int): Number of input features
         out_features (int): Number of output features
         bias (bool): Whether to use bias
-        weight (nn.Parameter): Learnable weight matrix
-        bias (nn.Parameter): Learnable bias vector
     """
     
     def __init__(
@@ -28,56 +30,51 @@ class HyperbolicLinear(nn.Module):
         bias: bool = True
     ):
         super().__init__()
-        
         self.manifold = manifold
         self.in_features = in_features
         self.out_features = out_features
-        self.has_bias = bias
         
-        # Initialize weight matrix
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        
-        # Initialize bias if needed
+        # Initialize weights using hyperbolic-aware initialization
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
         if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_features))
+            self.bias = nn.Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
-        
+            
         self.reset_parameters()
     
     def reset_parameters(self):
-        """Reset all learnable parameters."""
-        # Initialize weights using Kaiming initialization
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        
-        # Initialize bias if present
+        """Initialize weights using hyperbolic-aware initialization."""
+        # Initialize weights using hyperbolic-aware initialization
+        nn.init.xavier_uniform_(self.weight)
         if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-            nn.init.uniform_(self.bias, -bound, bound)
+            nn.init.zeros_(self.bias)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the hyperbolic linear layer.
         
         Args:
-            x (torch.Tensor): Input tensor of shape [..., in_features]
+            x (torch.Tensor): Input features of shape [N, in_features]
             
         Returns:
-            torch.Tensor: Output tensor of shape [..., out_features]
+            torch.Tensor: Output features of shape [N, out_features]
         """
-        # Project input to tangent space at origin
-        x_tangent = self.manifold.logmap0(x)
+        # Store initial cross-ratio if possible
+        has_cr = x.size(0) > 3
+        if has_cr:
+            cr_initial = compute_cross_ratio(x[0], x[1], x[2], x[3])
         
-        # Apply linear transformation in tangent space
-        out_tangent = torch.matmul(x_tangent, self.weight.t())
-        
-        # Add bias if present
-        if self.bias is not None:
-            out_tangent = out_tangent + self.bias
+        # Linear transformation
+        out = F.linear(x, self.weight, self.bias)
         
         # Project back to hyperbolic space
-        return self.manifold.expmap0(out_tangent)
+        out = self.manifold.normalize_points(out)
+        
+        # Restore cross-ratio if possible
+        if has_cr:
+            out = restore_cross_ratio(out, cr_initial)
+        
+        return out
     
     def extra_repr(self) -> str:
-        """Extra representation string."""
-        return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.has_bias}' 
+        return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}' 

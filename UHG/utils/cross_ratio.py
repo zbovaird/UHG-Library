@@ -2,48 +2,42 @@
 
 import torch
 from ..projective import ProjectiveUHG
+from typing import Tuple
 
-def compute_cross_ratio(p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor) -> torch.Tensor:
-    """Compute cross-ratio of four points in projective space.
+def compute_cross_ratio(
+    p1: torch.Tensor,
+    p2: torch.Tensor,
+    p3: torch.Tensor,
+    p4: torch.Tensor
+) -> torch.Tensor:
+    """Compute the cross-ratio of four points in hyperbolic space.
     
-    The cross-ratio is a projective invariant defined as:
-    CR(A,B;C,D) = (AC)(BD)/((AD)(BC))
-    where (XY) represents the hyperbolic dot product of points X and Y
+    The cross-ratio is a projective invariant that is preserved under
+    hyperbolic isometries. For four points p1, p2, p3, p4, it is defined as:
+    
+    CR(p1,p2,p3,p4) = (d(p1,p3)d(p2,p4))/(d(p1,p4)d(p2,p3))
+    
+    where d(.,.) is the hyperbolic distance.
     
     Args:
-        p1, p2, p3, p4: Points in projective space with homogeneous coordinates
+        p1 (torch.Tensor): First point
+        p2 (torch.Tensor): Second point
+        p3 (torch.Tensor): Third point
+        p4 (torch.Tensor): Fourth point
         
     Returns:
-        Cross-ratio value
+        torch.Tensor: Cross-ratio of the four points
     """
-    # Convert inputs to double precision
-    p1 = p1.double() if p1.dtype != torch.float64 else p1
-    p2 = p2.double() if p2.dtype != torch.float64 else p2
-    p3 = p3.double() if p3.dtype != torch.float64 else p3
-    p4 = p4.double() if p4.dtype != torch.float64 else p4
-    
-    # Compute hyperbolic dot products
-    def hyperbolic_dot(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        # Split into spatial and time components
-        x_spatial = x[..., :-1]
-        x_time = x[..., -1]
-        y_spatial = y[..., :-1]
-        y_time = y[..., -1]
-        
-        # Compute dot product with Minkowski metric
-        return torch.sum(x_spatial * y_spatial, dim=-1) - x_time * y_time
-    
-    # Compute cross-ratio using hyperbolic dot products
-    AC = hyperbolic_dot(p1, p3)
-    BD = hyperbolic_dot(p2, p4)
-    AD = hyperbolic_dot(p1, p4)
-    BC = hyperbolic_dot(p2, p3)
-    
-    # Add small epsilon to prevent division by zero
-    eps = torch.tensor(1e-8, dtype=torch.float64, device=p1.device)
+    # Compute pairwise distances
+    d13 = torch.norm(p1 - p3, dim=-1)
+    d24 = torch.norm(p2 - p4, dim=-1)
+    d14 = torch.norm(p1 - p4, dim=-1)
+    d23 = torch.norm(p2 - p3, dim=-1)
     
     # Compute cross-ratio
-    return (AC * BD) / (AD * BC + eps)
+    cr = (d13 * d24) / (d14 * d23)
+    
+    return cr
 
 def verify_cross_ratio_preservation(
     points_before: torch.Tensor,

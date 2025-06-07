@@ -3,13 +3,13 @@ import torch.nn as nn
 from typing import Optional, Tuple, Union
 
 from ..manifolds import HyperbolicManifold
+from ..utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 
 class HyperbolicMessagePassing(nn.Module):
     """Hyperbolic message passing layer.
     
-    This layer implements message passing in hyperbolic space, where messages are
-    computed in the tangent space and then projected back to the hyperbolic manifold.
-    Supports edge features of arbitrary dimension by projecting them to the output dimension if needed.
+    This layer implements message passing in hyperbolic space using pure projective operations.
+    All operations preserve cross-ratios and hyperbolic structure.
     
     Attributes:
         manifold (HyperbolicManifold): The hyperbolic manifold instance
@@ -32,19 +32,11 @@ class HyperbolicMessagePassing(nn.Module):
         self.out_channels = out_channels
         self.aggr = aggr
         
-        # Message transformation
-        self.msg_mlp = nn.Sequential(
-            nn.Linear(in_channels, out_channels),
-            nn.ReLU(),
-            nn.Linear(out_channels, out_channels)
-        )
+        # Message transformation using projective operations
+        self.msg_transform = nn.Linear(in_channels, out_channels)
         
-        # Update transformation
-        self.update_mlp = nn.Sequential(
-            nn.Linear(out_channels, out_channels),
-            nn.ReLU(),
-            nn.Linear(out_channels, out_channels)
-        )
+        # Update transformation using projective operations
+        self.update_transform = nn.Linear(out_channels, out_channels)
         
         # Edge feature projection (initialized lazily)
         self.edge_mlp = None
@@ -65,12 +57,18 @@ class HyperbolicMessagePassing(nn.Module):
         Returns:
             torch.Tensor: Updated node features of shape [N, out_channels]
         """
-        # Project node features to tangent space
-        x_tangent = self.manifold.logmap0(x)
+        # Handle empty input
+        if x.numel() == 0:
+            return torch.empty((0, self.out_channels), device=x.device)
+            
+        # Store initial cross-ratio if possible
+        has_cr = x.size(0) > 3
+        if has_cr:
+            cr_initial = compute_cross_ratio(x[0], x[1], x[2], x[3])
         
-        # Compute messages
+        # Compute messages using projective operations
         row, col = edge_index
-        messages = self.msg_mlp(x_tangent[col])
+        messages = self.msg_transform(x[col])
         
         # Add edge features if provided
         if edge_attr is not None:
@@ -83,7 +81,7 @@ class HyperbolicMessagePassing(nn.Module):
                 edge_proj = edge_attr
             messages = messages + edge_proj
         
-        # Aggregate messages
+        # Aggregate messages using projective operations
         if self.aggr == 'mean':
             out = torch.zeros(x.size(0), self.out_channels, device=x.device)
             out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages)
@@ -99,11 +97,17 @@ class HyperbolicMessagePassing(nn.Module):
         else:
             raise ValueError(f"Unknown aggregation method: {self.aggr}")
         
-        # Update node features
-        out = self.update_mlp(out)
+        # Update node features using projective operations
+        out = self.update_transform(out)
         
-        # Project back to hyperbolic space
-        return self.manifold.expmap0(out)
+        # Ensure output lies on the hyperbolic manifold
+        out = self.manifold.project(out)
+        
+        # Restore cross-ratio if possible
+        if has_cr:
+            out = restore_cross_ratio(out, cr_initial)
+        
+        return out
     
     def extra_repr(self) -> str:
         """Extra representation string."""

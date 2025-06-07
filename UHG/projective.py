@@ -968,3 +968,35 @@ class ProjectiveUHG:
         cr = num / (denom + self.epsilon)
         print("[DEBUG] cross_ratio: cr=", cr)
         return cr
+
+    def add(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
+        """
+        Add two points in projective space using pure projective operations.
+        This is done by computing the weighted sum and normalizing.
+        
+        Args:
+            p1: First point [..., D]
+            p2: Second point [..., D]
+            
+        Returns:
+            Sum point [..., D]
+        """
+        # Ensure inputs are tensors
+        p1 = torch.as_tensor(p1)
+        p2 = torch.as_tensor(p2)
+        
+        # Compute weighted sum
+        sum_point = p1 + p2
+        
+        # Normalize result
+        return self.normalize_points(sum_point)
+    
+    def manifold(self) -> torch.Tensor:
+        """
+        Get the manifold structure matrix for UHG.
+        In UHG, we use the hyperbolic form J = diag(1, 1, -1).
+        
+        Returns:
+            Manifold structure matrix J
+        """
+        return torch.diag(torch.tensor([1.0, 1.0, -1.0]))
