@@ -1,11 +1,10 @@
 """
-Universal Hyperbolic Geometry (UHG) Library.
-
-This library provides a pure implementation of UHG principles using projective geometry,
-without relying on differential geometry or manifold concepts.
+Universal Hyperbolic Geometry Library
+A PyTorch library for hyperbolic deep learning using Universal Hyperbolic Geometry principles.
+All operations are performed directly in hyperbolic space without tangent space mappings.
 """
 
-__version__: str = "0.3.5"
+__version__: str = "0.3.6"
 from typing import List
 
 from .projective import ProjectiveUHG
