@@ -165,34 +165,28 @@ class UHGBaseOptimizer(Optimizer):
 
         return new_point
         
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        """
-        Perform a single optimization step.
-        
-        Args:
-            closure: A closure that reevaluates the model and returns the loss
-            
-        Returns:
-            Loss value if closure is provided
-        """
+    def step(self, closure: Optional[Callable[[], torch.Tensor]] = None) -> Optional[torch.Tensor]:
+        """Perform a single optimization step using pure projective operations."""
         loss = None
         if closure is not None:
             loss = closure()
-            
+
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                    
-                # Get gradient and current parameter
+
+                # Get current point and gradient
+                x = p.data
                 grad = p.grad.data
-                param = p.data
-                
-                # Update parameters using hyperbolic gradient descent
-                p.data = self._update_hyperbolic_step(param, grad, group)
-                
-                # Verify manifold constraints
-                if not self._check_manifold_constraint(p.data, group):
-                    raise RuntimeError("Parameter update violated UHG manifold constraints")
-                    
+
+                # Update using projective operations
+                update = -group['lr'] * grad
+
+                # Apply update using projective addition
+                p.data = self.manifold.add(x, update)
+
+                # Normalize to ensure point stays on manifold
+                p.data = self.manifold.normalize_points(p.data)
+
         return loss 

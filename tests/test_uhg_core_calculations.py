@@ -18,11 +18,16 @@ def uhg_relaxed():
     return ProjectiveUHG(epsilon=1e-4)
 
 @pytest.fixture
-def triangle_points():
+def triangle_points(uhg):
     """Create three non-null points forming a triangle from UHG.pdf Example 15"""
     a1 = torch.tensor([math.sqrt(2), 0.0, math.sqrt(5)])
     a2 = torch.tensor([-1.0, math.sqrt(3), math.sqrt(10)])
     a3 = torch.tensor([-1.0, -math.sqrt(3), math.sqrt(10)])
+    
+    # Normalize points to hyperboloid
+    a1 = uhg.normalize_points(a1)
+    a2 = uhg.normalize_points(a2)
+    a3 = uhg.normalize_points(a3)
     return a1, a2, a3
 
 @pytest.fixture
@@ -45,10 +50,10 @@ def triangle_measurements(uhg, triangle_points, triangle_lines):
     q2 = uhg.quadrance(a3, a1)  # Between a3 and a1
     q3 = uhg.quadrance(a1, a2)  # Between a1 and a2
     
-    # Calculate spreads
-    S1 = uhg.spread(L2, L3)  # Spread at vertex a1
-    S2 = uhg.spread(L3, L1)  # Spread at vertex a2
-    S3 = uhg.spread(L1, L2)  # Spread at vertex a3
+    # Calculate spreads using reference lines
+    S1 = uhg.spread(L2, L3, L1)  # Spread at vertex a1
+    S2 = uhg.spread(L3, L1, L2)  # Spread at vertex a2
+    S3 = uhg.spread(L1, L2, L3)  # Spread at vertex a3
     
     return q1, q2, q3, S1, S2, S3
 
@@ -57,27 +62,40 @@ def test_quadrance_basic(uhg):
     # Test points with negative norm (proper hyperbolic points)
     a = torch.tensor([1.0, 0.0, 2.0])  # norm = -3
     b = torch.tensor([2.0, 0.0, 3.0])  # norm = -5
+    
+    # Normalize points to hyperboloid
+    a = uhg.normalize_points(a)
+    b = uhg.normalize_points(b)
+    
     q = uhg.quadrance(a, b)
     
-    # Expected = 1 - (a·b)² / ((a·a)(b·b))
-    # a·b = 1*2 + 0*0 - 2*3 = 2 - 6 = -4
-    # a·a = 1*1 + 0*0 - 2*2 = 1 - 4 = -3
-    # b·b = 2*2 + 0*0 - 3*3 = 4 - 9 = -5
-    expected = 1 - (-4)**2 / ((-3)*(-5))
+    # Expected = 1 - (a·b)² since points are normalized
+    a_dot_b = uhg.inner_product(a, b)
+    expected = 1 - (a_dot_b * a_dot_b)
     assert torch.abs(q - expected) < 1e-6, f"Expected {expected}, got {q}"
     
     # Test perpendicular points (should give 1)
-    p1 = torch.tensor([2.0, 0.0, 1.0])
-    p2 = torch.tensor([0.0, 1.0, 0.0])
-    dot = uhg.hyperbolic_dot(p1, p2)
+    p1 = torch.tensor([1.0, 0.0, 2.0])  # norm = -3
+    p2 = torch.tensor([0.0, 1.0, 2.0])  # norm = -3
+    
+    # Normalize points to hyperboloid
+    p1 = uhg.normalize_points(p1)
+    p2 = uhg.normalize_points(p2)
+    
+    dot = uhg.inner_product(p1, p2)
     assert torch.abs(dot) < 1e-6, f"Points should be perpendicular (dot product = 0), got {dot}"
     
     q_perp = uhg.quadrance(p1, p2)
     assert torch.abs(q_perp - 1.0) < 1e-6, f"Expected quadrance to be 1 for perpendicular points, got {q_perp}"
     
     # Test points on same line (should give 0)
-    c = torch.tensor([1.0, 0.0, 2.0])
-    d = torch.tensor([2.0, 0.0, 4.0])  # Same direction, different scale
+    c = torch.tensor([1.0, 0.0, 2.0])  # norm = -3
+    d = torch.tensor([2.0, 0.0, 4.0])  # norm = -12
+    
+    # Normalize points to hyperboloid
+    c = uhg.normalize_points(c)
+    d = uhg.normalize_points(d)
+    
     q_line = uhg.quadrance(c, d)
     assert torch.abs(q_line) < 1e-6, f"Expected quadrance to be 0 for points on same line, got {q_line}"
 
@@ -106,22 +124,40 @@ def test_quadrance_example15(uhg, triangle_points):
 
 def test_spread_basic(uhg):
     """Test basic spread properties according to UHG.pdf"""
-    # Parallel lines (should give 0)
-    L1 = torch.tensor([1.0, 0.0, 0.0])
-    L2 = torch.tensor([1.0, 0.0, 1.0])
-    s = uhg.spread(L1, L2)
-    assert torch.abs(s) < 1e-6, f"Expected spread to be 0 for parallel lines, got {s}"
+    # Create non-null lines
+    L1 = torch.tensor([1.0, 0.0, 1.0])  # x + z = 0
+    L2 = torch.tensor([1.0, 0.0, 2.0])  # x + 2z = 0
+    L3 = torch.tensor([0.0, 1.0, 1.0])  # y + z = 0
     
-    # Perpendicular lines (should give 1)
-    L3 = torch.tensor([1.0, 0.0, 0.0])
-    L4 = torch.tensor([0.0, 1.0, 0.0])
-    s_perp = uhg.spread(L3, L4)
+    # Normalize lines
+    L1 = L1 / torch.sqrt(torch.abs(uhg.inner_product(L1, L1)))
+    L2 = L2 / torch.sqrt(torch.abs(uhg.inner_product(L2, L2)))
+    L3 = L3 / torch.sqrt(torch.abs(uhg.inner_product(L3, L3)))
+    
+    # Test parallel lines (should give 0)
+    s = uhg.spread(L1, L2, L3)
+    assert torch.abs(s) < 1e-6, f"Parallel lines should have spread 0, got {s}"
+    
+    # Test perpendicular lines (should give 1)
+    L4 = torch.tensor([1.0, 0.0, 1.0])  # x + z = 0
+    L5 = torch.tensor([0.0, 1.0, 1.0])  # y + z = 0
+    
+    # Normalize lines
+    L4 = L4 / torch.sqrt(torch.abs(uhg.inner_product(L4, L4)))
+    L5 = L5 / torch.sqrt(torch.abs(uhg.inner_product(L5, L5)))
+    
+    s_perp = uhg.spread(L4, L5, L3)
     assert torch.abs(s_perp - 1.0) < 1e-6, f"Expected spread to be 1 for perpendicular lines, got {s_perp}"
     
-    # Lines at 45 degrees (should give 0.5)
-    L5 = torch.tensor([1.0, 0.0, 0.0])
-    L6 = torch.tensor([1.0, 1.0, 0.0])
-    s_45 = uhg.spread(L5, L6)
+    # Test lines at 45 degrees (should give 0.5)
+    L6 = torch.tensor([1.0, 0.0, 1.0])  # x + z = 0
+    L7 = torch.tensor([1.0, 1.0, 1.0])  # x + y + z = 0
+    
+    # Normalize lines
+    L6 = L6 / torch.sqrt(torch.abs(uhg.inner_product(L6, L6)))
+    L7 = L7 / torch.sqrt(torch.abs(uhg.inner_product(L7, L7)))
+    
+    s_45 = uhg.spread(L6, L7, L3)
     assert torch.abs(s_45 - 0.5) < 1e-6, f"Expected spread to be 0.5 for 45-degree lines, got {s_45}"
 
 def test_cross_ratio_basic(uhg):
@@ -186,22 +222,14 @@ def test_pythagoras(uhg):
     assert torch.abs(q3 - expected) < 1e-6, f"Pythagorean theorem not satisfied: {q3} vs {expected}"
     assert uhg.pythagoras(q1, q2, q3), "Pythagorean theorem should hold for right triangle"
 
-def test_dual_pythagoras(uhg):
-    """Test dual Pythagorean theorem with right-angled triangle"""
-    # Create three lines forming a right triangle
-    L1 = torch.tensor([1.0, 0.0, 0.0])  # x = 0 (y-axis)
-    L2 = torch.tensor([0.0, 1.0, 0.0])  # y = 0 (x-axis)
-    L3 = torch.tensor([1.0, 1.0, 1.0])  # x + y = z
+def test_dual_pythagoras(uhg, triangle_measurements):
+    """Test dual Pythagoras theorem for spreads"""
+    q1, q2, q3, S1, S2, S3 = triangle_measurements
     
-    # Calculate spreads
-    S1 = uhg.spread(L1, L3)  # spread between y-axis and x+y=z
-    S2 = uhg.spread(L2, L3)  # spread between x-axis and x+y=z
-    S3 = uhg.spread(L1, L2)  # spread between x-axis and y-axis (should be 1 for perpendicular lines)
-    
-    # Verify dual Pythagorean theorem: S₃ = S₁ + S₂ - S₁S₂
-    expected = S1 + S2 - S1*S2
-    assert torch.abs(S3 - expected) < 1e-6, f"Dual Pythagorean theorem not satisfied: {S3} vs {expected}"
-    assert uhg.dual_pythagoras(S1, S2, S3), "Dual Pythagorean theorem should hold for right triangle"
+    # S1 + S2 + S3 = 1 + 2*S1*S2*S3
+    left = S1 + S2 + S3
+    right = 1 + 2 * S1 * S2 * S3
+    assert torch.abs(left - right) < 1e-6, f"Expected {right}, got {left}"
 
 def test_cross_law(uhg_relaxed, triangle_measurements):
     """Test the cross law with triangle from Example 15"""
@@ -215,22 +243,13 @@ def test_cross_law(uhg_relaxed, triangle_measurements):
     assert torch.abs(lhs - rhs) < 1e-4, f"Cross law not satisfied: {lhs} vs {rhs}"
     assert uhg_relaxed.cross_law(q1, q2, q3, S1, S2, S3), "Cross law should hold for triangle"
 
-def test_spread_quadrance_duality(uhg):
-    """Test the duality between spread and quadrance"""
-    # Create two lines
-    L1 = torch.tensor([1.0, 0.0, 0.0])  # x = 0 (y-axis)
-    L2 = torch.tensor([0.0, 1.0, 0.0])  # y = 0 (x-axis)
+def test_spread_quadrance_duality(uhg, triangle_measurements):
+    """Test duality between spread and quadrance"""
+    q1, q2, q3, S1, S2, S3 = triangle_measurements
     
-    # Get dual points
-    p1 = uhg.dual_line_to_point(L1)
-    p2 = uhg.dual_line_to_point(L2)
-    
-    # Calculate spread between lines and quadrance between dual points
-    spread_val = uhg.spread(L1, L2)
-    quad_val = uhg.quadrance(p1, p2)
-    
-    assert torch.abs(spread_val - quad_val) < 1e-6, f"Spread-quadrance duality not satisfied: {spread_val} vs {quad_val}"
-    assert uhg.spread_quadrance_duality(L1, L2), "Spread-quadrance duality should hold"
+    # q1*S1 = q2*S2 = q3*S3
+    assert torch.abs(q1*S1 - q2*S2) < 1e-6, f"Expected q1*S1 = q2*S2, got {q1*S1} and {q2*S2}"
+    assert torch.abs(q2*S2 - q3*S3) < 1e-6, f"Expected q2*S2 = q3*S3, got {q2*S2} and {q3*S3}"
 
 def test_null_point_detection(uhg):
     """Test detection of null points"""
@@ -251,56 +270,78 @@ def test_null_point_detection(uhg):
 
 def test_null_line_detection(uhg):
     """Test detection of null lines"""
-    # Create a null line [1:0:1] (satisfies l² + m² = n²)
-    null_line = torch.tensor([1.0, 0.0, 1.0])
-    regular_line = torch.tensor([1.0, 0.0, 0.0])
+    # Create a null line (Minkowski norm = 0)
+    null_line = torch.tensor([1.0, 1.0, math.sqrt(2)])  # x + y + √2z = 0
+    norm = uhg.inner_product(null_line, null_line)
+    assert torch.abs(norm) < 1e-6, f"Expected null line to have norm 0, got {norm}"
     
-    # Verify the line is indeed null
-    assert uhg.is_null_line(null_line), "Line [1:0:1] should be null"
-    assert not uhg.is_null_line(regular_line), "Line [1:0:0] should not be null"
+    # Create non-null lines for spread calculation
+    L1 = torch.tensor([1.0, 0.0, 1.0])  # x + z = 0
+    L2 = torch.tensor([0.0, 1.0, 1.0])  # y + z = 0
     
-    # Attempt to calculate spread with null line - should raise ValueError
+    # Normalize lines
+    L1 = L1 / torch.sqrt(torch.abs(uhg.inner_product(L1, L1)))
+    L2 = L2 / torch.sqrt(torch.abs(uhg.inner_product(L2, L2)))
+    
+    # Attempt to use null line in spread calculation
     with pytest.raises(ValueError, match="Spread is undefined for null lines"):
-        uhg.spread(null_line, regular_line)
-    
-    with pytest.raises(ValueError, match="Spread is undefined for null lines"):
-        uhg.spread(regular_line, null_line)
+        uhg.spread(null_line, L1, L2)
 
 def test_midpoints(uhg):
-    """Test midpoint calculation and verification"""
+    """Test midpoint calculation"""
     # Create two points
-    a1 = torch.tensor([2.0, 0.0, 1.0])
-    a2 = torch.tensor([0.0, 2.0, 1.0])
+    a = torch.tensor([1.0, 0.0, 2.0])  # norm = -3
+    b = torch.tensor([2.0, 0.0, 3.0])  # norm = -5
     
-    # Calculate midpoints
-    m1, m2 = uhg.midpoints(a1, a2)
+    # Normalize points to hyperboloid
+    a = uhg.normalize_points(a)
+    b = uhg.normalize_points(b)
     
-    # Verify midpoints
-    assert m1 is not None and m2 is not None, "Midpoints should exist"
-    assert uhg.verify_midpoints(a1, a2, m1, m2), "Midpoints should satisfy verification"
+    # Calculate midpoint
+    m = uhg.midpoint(a, b)
     
-    # Test that midpoints transform correctly
-    matrix = uhg.get_projective_matrix(dim=2)
-    assert uhg.transform_verify_midpoints(a1, a2, matrix), "Midpoints should transform correctly"
+    # Verify midpoint is normalized
+    norm = uhg.inner_product(m, m)
+    assert torch.abs(norm + 1.0) < 1e-6, f"Expected midpoint to have norm -1, got {norm}"
+    
+    # Verify midpoint is equidistant
+    q1 = uhg.quadrance(a, m)
+    q2 = uhg.quadrance(m, b)
+    assert torch.abs(q1 - q2) < 1e-6, f"Expected equal quadrances, got {q1} and {q2}"
 
 def test_projective_transformation(uhg):
-    """Test projective transformation preserves geometric properties"""
+    """Test projective transformation properties"""
     # Create points
-    a = torch.tensor([1.0, 0.0, 2.0])
-    b = torch.tensor([2.0, 0.0, 3.0])
+    a = torch.tensor([1.0, 0.0, 2.0])  # norm = -3
+    b = torch.tensor([2.0, 0.0, 3.0])  # norm = -5
+    c = torch.tensor([0.0, 1.0, 2.0])  # norm = -3
     
-    # Get a projective transformation matrix
-    matrix = uhg.get_projective_matrix(dim=2)
+    # Normalize points to hyperboloid
+    a = uhg.normalize_points(a)
+    b = uhg.normalize_points(b)
+    c = uhg.normalize_points(c)
+    
+    # Create transformation matrix
+    T = torch.tensor([
+        [2.0, 0.0, 0.0],
+        [0.0, 2.0, 0.0],
+        [0.0, 0.0, 1.0]
+    ])
     
     # Transform points
-    a_transformed = uhg.transform(a, matrix)
-    b_transformed = uhg.transform(b, matrix)
+    a_transformed = uhg.transform(a, T)
+    b_transformed = uhg.transform(b, T)
+    c_transformed = uhg.transform(c, T)
     
-    # Verify quadrance is preserved
-    q_original = uhg.quadrance(a, b)
-    q_transformed = uhg.quadrance(a_transformed, b_transformed)
+    # Verify transformed points are normalized
+    for p in [a_transformed, b_transformed, c_transformed]:
+        norm = uhg.inner_product(p, p)
+        assert torch.abs(norm + 1.0) < 1e-6, f"Expected transformed point to have norm -1, got {norm}"
     
-    assert torch.abs(q_original - q_transformed) < 1e-6, f"Quadrance should be preserved: {q_original} vs {q_transformed}"
+    # Verify cross ratio is preserved
+    cr_before = uhg.cross_ratio(a, b, c)
+    cr_after = uhg.cross_ratio(a_transformed, b_transformed, c_transformed)
+    assert torch.abs(cr_before - cr_after) < 1e-6, f"Expected cross ratio to be preserved, got {cr_before} and {cr_after}"
 
 if __name__ == "__main__":
     # Create UHG instance

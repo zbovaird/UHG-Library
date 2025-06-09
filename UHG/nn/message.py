@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple, Union
 
-from ..manifolds import HyperbolicManifold
+from ..projective import ProjectiveUHG
 from ..utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 
 class HyperbolicMessagePassing(nn.Module):
@@ -20,23 +20,31 @@ class HyperbolicMessagePassing(nn.Module):
     
     def __init__(
         self,
-        manifold: HyperbolicManifold,
-        in_channels: int,
-        out_channels: int,
+        in_features: int,
+        out_features: int,
+        edge_features: Optional[int] = None,
         aggr: str = 'mean'
     ):
         super().__init__()
-        
-        self.manifold = manifold
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.uhg = ProjectiveUHG()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.edge_features = edge_features
         self.aggr = aggr
         
-        # Message transformation using projective operations
-        self.msg_transform = nn.Linear(in_channels, out_channels)
+        # Message computation
+        self.message_mlp = nn.Sequential(
+            nn.Linear(in_features * 2 + (edge_features if edge_features else 0), out_features),
+            nn.ReLU(),
+            nn.Linear(out_features, out_features)
+        )
         
-        # Update transformation using projective operations
-        self.update_transform = nn.Linear(out_channels, out_channels)
+        # Update function
+        self.update_mlp = nn.Sequential(
+            nn.Linear(in_features + out_features, out_features),
+            nn.ReLU(),
+            nn.Linear(out_features, out_features)
+        )
         
         # Edge feature projection (initialized lazily)
         self.edge_mlp = None
@@ -59,7 +67,7 @@ class HyperbolicMessagePassing(nn.Module):
         """
         # Handle empty input
         if x.numel() == 0:
-            return torch.empty((0, self.out_channels), device=x.device)
+            return torch.empty((0, self.out_features), device=x.device)
             
         # Store initial cross-ratio if possible
         has_cr = x.size(0) > 3
@@ -68,40 +76,29 @@ class HyperbolicMessagePassing(nn.Module):
         
         # Compute messages using projective operations
         row, col = edge_index
-        messages = self.msg_transform(x[col])
-        
-        # Add edge features if provided
-        if edge_attr is not None:
-            if edge_attr.shape[-1] != self.out_channels:
-                # Lazily initialize edge_mlp if needed
-                if self.edge_mlp is None or self.edge_mlp.in_features != edge_attr.shape[-1]:
-                    self.edge_mlp = nn.Linear(edge_attr.shape[-1], self.out_channels).to(edge_attr.device)
-                edge_proj = self.edge_mlp(edge_attr)
-            else:
-                edge_proj = edge_attr
-            messages = messages + edge_proj
+        messages = self.message_mlp(torch.cat([x[col], edge_attr], dim=-1))
         
         # Aggregate messages using projective operations
         if self.aggr == 'mean':
-            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
-            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages)
+            out = torch.zeros(x.size(0), self.out_features, device=x.device)
+            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_features), messages)
             count = torch.zeros(x.size(0), device=x.device)
             count.scatter_add_(0, row, torch.ones_like(row, dtype=torch.float))
             out = out / (count.unsqueeze(-1) + 1e-8)
         elif self.aggr == 'sum':
-            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
-            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages)
+            out = torch.zeros(x.size(0), self.out_features, device=x.device)
+            out.scatter_add_(0, row.unsqueeze(-1).expand(-1, self.out_features), messages)
         elif self.aggr == 'max':
-            out = torch.zeros(x.size(0), self.out_channels, device=x.device)
-            out.scatter_reduce_(0, row.unsqueeze(-1).expand(-1, self.out_channels), messages, reduce='amax')
+            out = torch.zeros(x.size(0), self.out_features, device=x.device)
+            out.scatter_reduce_(0, row.unsqueeze(-1).expand(-1, self.out_features), messages, reduce='amax')
         else:
             raise ValueError(f"Unknown aggregation method: {self.aggr}")
         
         # Update node features using projective operations
-        out = self.update_transform(out)
+        out = self.update_mlp(torch.cat([x, out], dim=-1))
         
         # Ensure output lies on the hyperbolic manifold
-        out = self.manifold.project(out)
+        out = self.uhg.project(out)
         
         # Restore cross-ratio if possible
         if has_cr:
@@ -111,4 +108,4 @@ class HyperbolicMessagePassing(nn.Module):
     
     def extra_repr(self) -> str:
         """Extra representation string."""
-        return f'in_channels={self.in_channels}, out_channels={self.out_channels}, aggr={self.aggr}' 
+        return f'in_features={self.in_features}, out_features={self.out_features}, aggr={self.aggr}' 

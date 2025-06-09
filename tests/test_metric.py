@@ -17,7 +17,7 @@ References:
 import pytest
 import torch
 import numpy as np
-from uhg.metric import HyperbolicMetric
+from uhg.metrics import UHGMetric as HyperbolicMetric
 from uhg.projective import ProjectiveUHG
 
 @pytest.fixture

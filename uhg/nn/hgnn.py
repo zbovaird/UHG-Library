@@ -1,52 +1,60 @@
 import torch
 import torch.nn as nn
-from typing import Optional
-from .attention import HyperbolicAttention
-from uhg.manifolds import HyperbolicManifold
+import torch.nn.functional as F
+from typing import Optional, Tuple
+from ..projective import ProjectiveUHG
 
 class HyperbolicGATLayer(nn.Module):
     """
     A single layer of UHG-compliant Hyperbolic Graph Attention Network (HGAT).
     Uses projective geometry and preserves UHG invariants.
     """
-    def __init__(self, manifold: HyperbolicManifold, in_channels: int, out_channels: int, num_heads: int = 1, dropout: float = 0.0, concat: bool = True):
+    def __init__(self, in_features: int, out_features: int, num_heads: int = 1, dropout: float = 0.0, concat: bool = True):
         super().__init__()
-        self.manifold = manifold
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.uhg = ProjectiveUHG()
+        self.in_features = in_features
+        self.out_features = out_features
         self.num_heads = num_heads
-        self.concat = concat
         self.dropout = dropout
-        print(f"[DEBUG][HGATLayer] __init__: in_channels={in_channels}, out_channels={out_channels}, num_heads={num_heads}, concat={concat}")
-        # Attention module
-        self.attn = HyperbolicAttention(
-            manifold=manifold,
-            in_channels=in_channels,
-            num_heads=num_heads,
-            dropout=dropout,
-            concat=concat
-        )
-        # Output projection always matches attention output shape
+        self.concat = concat
+        print(f"[DEBUG][HGATLayer] __init__: in_features={in_features}, out_features={out_features}, num_heads={num_heads}, concat={concat}")
+        # Attention parameters
+        self.query = nn.Linear(in_features, out_features * num_heads)
+        self.key = nn.Linear(in_features, out_features * num_heads)
+        self.value = nn.Linear(in_features, out_features * num_heads)
+        # Output projection
         if concat:
-            self.lin = nn.Linear(num_heads * in_channels, out_channels)
-            print(f"[DEBUG][HGATLayer] __init__: lin in_features={num_heads * in_channels}, out_features={out_channels}")
+            self.out_proj = nn.Linear(out_features * num_heads, out_features)
+            print(f"[DEBUG][HGATLayer] __init__: out_proj in_features={out_features * num_heads}, out_features={out_features}")
         else:
-            self.lin = nn.Linear(in_channels, out_channels)
-            print(f"[DEBUG][HGATLayer] __init__: lin in_features={in_channels}, out_features={out_channels}")
+            self.out_proj = nn.Linear(out_features, out_features)
+            print(f"[DEBUG][HGATLayer] __init__: out_proj in_features={out_features}, out_features={out_features}")
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.attn.reset_parameters()
-        nn.init.xavier_uniform_(self.lin.weight)
-        if self.lin.bias is not None:
-            nn.init.zeros_(self.lin.bias)
+        nn.init.xavier_uniform_(self.query.weight)
+        if self.query.bias is not None:
+            nn.init.zeros_(self.query.bias)
+        nn.init.xavier_uniform_(self.key.weight)
+        if self.key.bias is not None:
+            nn.init.zeros_(self.key.bias)
+        nn.init.xavier_uniform_(self.value.weight)
+        if self.value.bias is not None:
+            nn.init.zeros_(self.value.bias)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        if self.out_proj.bias is not None:
+            nn.init.zeros_(self.out_proj.bias)
 
     def forward(self, x, edge_index, edge_attr=None, mask=None):
         print(f"[DEBUG][HGATLayer] forward: x.shape={x.shape}")
-        h = self.attn(x, edge_index, edge_attr, mask)
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+        print(f"[DEBUG][HGATLayer] forward: q.shape={q.shape}, k.shape={k.shape}, v.shape={v.shape}")
+        h = self.uhg.attn(q, k, v, edge_index, edge_attr, mask)
         print(f"[DEBUG][HGATLayer] forward: attn output shape={h.shape}")
-        out = self.lin(h)
-        print(f"[DEBUG][HGATLayer] forward: lin output shape={out.shape}")
+        out = self.out_proj(h)
+        print(f"[DEBUG][HGATLayer] forward: out_proj output shape={out.shape}")
         return out
 
 class HyperbolicGAT(nn.Module):
@@ -54,18 +62,18 @@ class HyperbolicGAT(nn.Module):
     Multi-layer UHG-compliant Hyperbolic Graph Attention Network (HGAT).
     Stackable, supports edge features and masking.
     """
-    def __init__(self, manifold: HyperbolicManifold, in_channels: int, hidden_channels: int, out_channels: int, num_layers: int = 2, num_heads: int = 1, dropout: float = 0.0):
+    def __init__(self, in_features: int, hidden_features: int, out_features: int, num_layers: int = 2, num_heads: int = 1, dropout: float = 0.0):
         super().__init__()
         self.layers = nn.ModuleList()
         self.num_layers = num_layers
         self.dropout = nn.Dropout(dropout)
-        curr_in = in_channels
+        curr_in = in_features
         # All layers except the last
         for i in range(num_layers - 1):
-            self.layers.append(HyperbolicGATLayer(manifold, curr_in, hidden_channels, num_heads=num_heads, dropout=dropout, concat=True))
-            curr_in = hidden_channels
+            self.layers.append(HyperbolicGATLayer(curr_in, hidden_features, num_heads=num_heads, dropout=dropout, concat=True))
+            curr_in = hidden_features
         # Last layer
-        self.layers.append(HyperbolicGATLayer(manifold, curr_in, out_channels, num_heads=1, dropout=dropout, concat=False))
+        self.layers.append(HyperbolicGATLayer(curr_in, out_features, num_heads=1, dropout=dropout, concat=False))
 
     def forward(self, x, edge_index, edge_attr=None, mask=None):
         for i, layer in enumerate(self.layers):
@@ -84,12 +92,10 @@ def test_hgnn():
     num_heads = 2
     num_layers = 3
     edge_dim = 6
-    manifold = HyperbolicManifold()
     model = HyperbolicGAT(
-        manifold=manifold,
-        in_channels=in_channels,
-        hidden_channels=hidden_channels,
-        out_channels=out_channels,
+        in_features=in_channels,
+        hidden_features=hidden_channels,
+        out_features=out_channels,
         num_layers=num_layers,
         num_heads=num_heads,
         dropout=0.1

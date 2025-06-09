@@ -14,10 +14,9 @@ def get_version():
 
 setup(
     name="uhg",
-    version="0.3.4",
+    version="0.3.5",
     packages=find_packages(),
     install_requires=[
-        "torch>=1.8.0",
         "numpy>=1.19.0",
         "scipy>=1.6.0",
         "networkx>=2.5",
@@ -26,6 +25,7 @@ setup(
         "tqdm>=4.50.0"
     ],
     extras_require={
+        "torch": ["torch>=1.8.0"],
         "dev": [
             "black",
             "flake8",

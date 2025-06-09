@@ -17,17 +17,19 @@ References:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from torch import Tensor
+from .utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 
 class ProjectiveUHG:
     """
-    Universal Hyperbolic Geometry operations in projective space.
-    All operations follow the mathematical definitions from UHG.pdf.
+    Core projective operations for Universal Hyperbolic Geometry (UHG).
+    All operations are performed using pure projective geometry, following UHG.pdf.
+    No tangent space, exponential map, or logarithmic map operations are present.
     """
     
-    def __init__(self, epsilon: float = 1e-10):
-        self.epsilon = epsilon
+    def __init__(self, epsilon: float = 1e-6):
+        self.eps = epsilon
         
     def wedge(self, a: Tensor, b: Tensor) -> Tensor:
         """
@@ -54,8 +56,8 @@ class ProjectiveUHG:
         
         # Normalize if non-zero
         norm = torch.norm(wedge, dim=-1, keepdim=True)
-        mask = norm > self.epsilon
-        wedge = torch.where(mask, wedge / (norm + self.epsilon), wedge)
+        mask = norm > self.eps
+        wedge = torch.where(mask, wedge / (norm + self.eps), wedge)
         
         return wedge
 
@@ -85,45 +87,53 @@ class ProjectiveUHG:
         print("[DEBUG] hyperbolic_dot: space_dot=", space_dot, "time_dot=", time_dot, "result=", result)
         return result
 
-    def quadrance(self, a: Tensor, b: Tensor) -> Tensor:
+    def quadrance(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         """
-        Calculate quadrance between two points a=[x₁:y₁:z₁] and b=[x₂:y₂:z₂]
-        According to UHG.pdf equation (9):
-        q(a,b) = 1 - (x₁x₂ + y₁y₂ - z₁z₂)²/((x₁² + y₁² - z₁²)(x₂² + y₂² - z₂²))
-        
-        This is undefined if either point is null, equals 1 when points are perpendicular,
-        and equals 0 when points are the same or lie on a null line.
-        
+        Compute quadrance between points using UHG formula.
+        Reference: UHG.pdf, Ch. 2, Section 2.3
+
         Args:
             a: First point [x₁:y₁:z₁]
             b: Second point [x₂:y₂:z₂]
-            
+
         Returns:
             Quadrance between points
-            
+
         Raises:
-            ValueError: if either point is null
+            ValueError: if either point is null or not on hyperboloid
         """
-        print("[DEBUG] quadrance: a=", a, "b=", b)
-        a = self.normalize_points(a)
-        b = self.normalize_points(b)
-        if torch.any(self.is_null_point(a)) or torch.any(self.is_null_point(b)):
-            print("[WARNING] quadrance: One or more points are null. a=", a, "b=", b)
-            raise ValueError("Quadrance is undefined for null points")
-        a_dot_a = self.hyperbolic_dot(a, a)
-        b_dot_b = self.hyperbolic_dot(b, b)
-        a_dot_b = self.hyperbolic_dot(a, b)
-        print("[DEBUG] quadrance: a_dot_a=", a_dot_a, "b_dot_b=", b_dot_b, "a_dot_b=", a_dot_b)
-        denom = a_dot_a * b_dot_b
-        numer = a_dot_b ** 2
-        print("[DEBUG] quadrance: numer=", numer, "denom=", denom)
-        q = 1 - numer / denom
-        if torch.any(torch.isnan(q)):
-            print("[ERROR] quadrance: Result is NaN! a=", a, "b=", b, "numer=", numer, "denom=", denom)
-        q_clamped = torch.clamp(q, min=0.0, max=1.0)
-        print("[DEBUG] quadrance: q=", q, "q_clamped=", q_clamped)
-        return q_clamped
-        
+        # Ensure points are normalized to hyperboloid
+        try:
+            a_norm = self.normalize_points(a)
+            b_norm = self.normalize_points(b)
+        except ValueError as e:
+            raise ValueError(f"Points must be on hyperboloid: {e}")
+
+        # Compute Minkowski inner product
+        a_dot_b = self.inner_product(a_norm, b_norm)
+
+        # Compute quadrance using UHG formula
+        # q = 1 - (a·b)² since points are normalized
+        q = 1 - (a_dot_b * a_dot_b)
+
+        # Handle numerical stability
+        q = torch.where(
+            torch.abs(q) < self.eps,
+            torch.zeros_like(q),
+            q
+        )
+        q = torch.where(
+            torch.abs(q - 1.0) < self.eps,
+            torch.ones_like(q),
+            q
+        )
+
+        # Verify result is valid
+        if torch.any(torch.isnan(q)) or torch.any(torch.isinf(q)):
+            raise ValueError("Quadrance calculation resulted in NaN or Inf")
+
+        return q
+
     def det2(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
         """
         Compute 2x2 determinant for vectors arranged as:
@@ -132,74 +142,68 @@ class ProjectiveUHG:
         """
         return a * d - b * c
 
-    def spread(self, a: Tensor, b: Tensor, c: Tensor) -> Tensor:
+    def spread(self, L1: torch.Tensor, L2: torch.Tensor, L3: torch.Tensor) -> torch.Tensor:
         """
-        Calculate the spread between three points a, b, c.
-        The spread is the hyperbolic angle between the lines ab and ac.
+        Compute spread between two lines using a reference line.
+        Reference: UHG.pdf, Ch. 3, Section 3.2
 
         Args:
-            a: First point [x₁:y₁:z₁]
-            b: Second point [x₂:y₂:z₂]
-            c: Third point [x₃:y₃:z₃]
+            L1: First line [l₁:m₁:n₁]
+            L2: Second line [l₂:m₂:n₂]
+            L3: Reference line [l₃:m₃:n₃]
 
         Returns:
-            Spread between the lines ab and ac
+            Spread between L1 and L2
 
         Raises:
-            ValueError: if any point is null
+            ValueError: if any line is null or not properly normalized
         """
-        # Normalize points
-        a = self.normalize_points(a)
-        b = self.normalize_points(b)
-        c = self.normalize_points(c)
+        # Ensure lines are in homogeneous coordinates
+        if L1.dim() == 1:
+            L1 = L1.unsqueeze(0)
+        if L2.dim() == 1:
+            L2 = L2.unsqueeze(0)
+        if L3.dim() == 1:
+            L3 = L3.unsqueeze(0)
 
-        # Check for null points
-        if torch.any(self.is_null_point(a)) or torch.any(self.is_null_point(b)) or torch.any(self.is_null_point(c)):
-            print("[DEBUG] Spread: One or more points are null. a:", a, "b:", b, "c:", c)
-            raise ValueError("Spread is undefined for null points")
+        # Check for null lines
+        L1_norm = self.inner_product(L1, L1)
+        L2_norm = self.inner_product(L2, L2)
+        L3_norm = self.inner_product(L3, L3)
 
-        # Calculate quadrances
-        q1 = self.quadrance(b, c)  # Quadrance of bc
-        q2 = self.quadrance(a, c)  # Quadrance of ac
-        q3 = self.quadrance(a, b)  # Quadrance of ab
+        if torch.any(torch.abs(L1_norm) < self.eps) or \
+           torch.any(torch.abs(L2_norm) < self.eps) or \
+           torch.any(torch.abs(L3_norm) < self.eps):
+            raise ValueError("Spread is undefined for null lines")
 
-        # Calculate spread using UHG formula
-        # S = (q1 + q2 - q3)**2 / (4 * q1 * q2)
-        numerator = (q1 + q2 - q3)**2
-        denominator = 4 * q1 * q2
+        # Normalize lines to unit Minkowski norm
+        L1 = L1 / torch.sqrt(torch.abs(L1_norm)).unsqueeze(-1)
+        L2 = L2 / torch.sqrt(torch.abs(L2_norm)).unsqueeze(-1)
+        L3 = L3 / torch.sqrt(torch.abs(L3_norm)).unsqueeze(-1)
 
-        # Debug output
-        print("[DEBUG] Spread calculation:")
-        print("  a:", a)
-        print("  b:", b)
-        print("  c:", c)
-        print("  q1 (bc):", q1)
-        print("  q2 (ac):", q2)
-        print("  q3 (ab):", q3)
-        print("  numerator:", numerator)
-        print("  denominator:", denominator)
+        # Compute inner products
+        L1_dot_L2 = self.inner_product(L1, L2)
+        L1_dot_L3 = self.inner_product(L1, L3)
+        L2_dot_L3 = self.inner_product(L2, L3)
+
+        # Compute spread using UHG formula
+        # s = 1 - (L1·L2)²/((L1·L3)(L2·L3))
+        numerator = L1_dot_L2 * L1_dot_L2
+        denominator = L1_dot_L3 * L2_dot_L3
 
         # Handle numerical stability
-        if torch.any(denominator < self.epsilon):
-            print("[WARNING] Spread denominator near zero. Returning 1.0.")
-            return torch.ones_like(numerator)
+        denominator = torch.where(
+            torch.abs(denominator) < self.eps,
+            torch.ones_like(denominator) * self.eps,
+            denominator
+        )
 
-        # Calculate spread
-        S = numerator / denominator
+        s = 1 - (numerator / denominator)
 
-        # Check for NaN
-        if torch.any(torch.isnan(S)):
-            print("[ERROR] Spread result is NaN!")
-            print("  Inputs: a=", a, ", b=", b, ", c=", c)
-            print("  Quadrances: q1=", q1, ", q2=", q2, ", q3=", q3)
-            print("  Numerator:", numerator)
-            print("  Denominator:", denominator)
+        # Clamp spread to [0, 1] range
+        s = torch.clamp(s, 0.0, 1.0)
 
-        # Ensure result is in [0,1]
-        S_clamped = torch.clamp(S, min=0.0, max=1.0)
-        print("  Spread (before clamp):", S)
-        print("  Spread (clamped):", S_clamped)
-        return S_clamped
+        return s
 
     def opposite_points(self, a1: Tensor, a2: Tensor) -> Tuple[Tensor, Tensor]:
         """
@@ -231,8 +235,8 @@ class ProjectiveUHG:
         o2 = dot_22 * a1 - dot_12 * a2
         
         # Normalize outputs
-        o1 = o1 / (torch.norm(o1, dim=-1, keepdim=True) + self.epsilon)
-        o2 = o2 / (torch.norm(o2, dim=-1, keepdim=True) + self.epsilon)
+        o1 = o1 / (torch.norm(o1, dim=-1, keepdim=True) + self.eps)
+        o2 = o2 / (torch.norm(o2, dim=-1, keepdim=True) + self.eps)
         
         return o1, o2
     
@@ -242,7 +246,7 @@ class ProjectiveUHG:
         For 4 or more points, ensures cross ratio is preserved after normalization.
         """
         norms = torch.norm(points[..., :-1], dim=-1, keepdim=True)
-        normalized = points / (norms + self.epsilon)
+        normalized = points / (norms + self.eps)
         if points.size(0) > 3:
             cr_before = self.cross_ratio(points[0], points[1], points[2], points[3])
             cr_after = self.cross_ratio(normalized[0], normalized[1], normalized[2], normalized[3])
@@ -308,31 +312,33 @@ class ProjectiveUHG:
         
         return matrix
     
-    def transform(self, points: Tensor, matrix: Tensor) -> Tensor:
+    def transform(self, x: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
         """
-        Apply a projective transformation to points.
-        
+        Apply projective transformation to points.
+        Reference: UHG.pdf, Ch. 4, Section 4.1
+
         Args:
-            points: Points to transform [..., 3]
-            matrix: 3x3 transformation matrix
-            
+            x: Points to transform [x:y:z]
+            T: 3x3 transformation matrix
+
         Returns:
             Transformed points
+
+        Raises:
+            ValueError: if transformation results in null points
         """
-        if points.shape[-1] != 3 or matrix.shape[-2:] != (3, 3):
-            raise ValueError("Points must have shape (..., 3) and matrix must have shape (..., 3, 3)")
-            
-        # Reshape points for batch matrix multiply
-        points_flat = points.reshape(-1, 3)
-        
+        # Ensure points are in homogeneous coordinates
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+
         # Apply transformation
-        transformed = torch.matmul(points_flat, matrix.transpose(-2, -1))
-        
-        # Reshape back to original
-        transformed = transformed.reshape(points.shape)
-        
-        # Normalize result
-        return self.normalize_points(transformed)
+        x_transformed = torch.matmul(T, x.transpose(-2, -1)).transpose(-2, -1)
+
+        # Normalize transformed points to hyperboloid
+        try:
+            return self.normalize_points(x_transformed)
+        except ValueError as e:
+            raise ValueError(f"Transformation resulted in invalid points: {e}")
 
     def quadrance_from_cross_ratio(self, a1: Tensor, a2: Tensor) -> Tensor:
         """
@@ -349,7 +355,7 @@ class ProjectiveUHG:
         norm_1 = a1[..., 0]**2 + a1[..., 1]**2 - a1[..., 2]**2
         norm_2 = a2[..., 0]**2 + a2[..., 1]**2 - a2[..., 2]**2
         
-        if torch.any(torch.abs(norm_1) < self.epsilon) or torch.any(torch.abs(norm_2) < self.epsilon):
+        if torch.any(torch.abs(norm_1) < self.eps) or torch.any(torch.abs(norm_2) < self.eps):
             raise ValueError("Quadrance is undefined for null points")
             
         # For points on same line, quadrance is 0
@@ -362,7 +368,7 @@ class ProjectiveUHG:
         c = torch.zeros_like(a1)
         c[..., 2] = 1.0  # Reference point [0:0:1]
         
-        if torch.abs(det3(a1, a2, c)) < self.epsilon:
+        if torch.abs(det3(a1, a2, c)) < self.eps:
             return torch.zeros_like(norm_1)
             
         # Compute hyperbolic inner products
@@ -373,30 +379,126 @@ class ProjectiveUHG:
         o2 = norm_2.unsqueeze(-1) * a1 - dot_12.unsqueeze(-1) * a2
         
         # Normalize opposite points
-        o1 = o1 / (torch.norm(o1, dim=-1, keepdim=True) + self.epsilon)
-        o2 = o2 / (torch.norm(o2, dim=-1, keepdim=True) + self.epsilon)
+        o1 = o1 / (torch.norm(o1, dim=-1, keepdim=True) + self.eps)
+        o2 = o2 / (torch.norm(o2, dim=-1, keepdim=True) + self.eps)
         
         # Compute quadrance as 1 minus cross ratio
         cr = self.cross_ratio(a1, a2, o2, o1)
         return 1.0 - cr
     
-    def normalize_points(self, points: Tensor) -> Tensor:
+    def normalize_points(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Normalize points to have unit hyperbolic norm.
-        For a point [x:y:z], we ensure x² + y² < z².
+        Normalize points to lie on the hyperbolic manifold (Minkowski norm = -1).
+        Reference: UHG.pdf, Ch. 2, Section 2.2
 
         Args:
-            points: Points to normalize [..., 3]
+            x: Points to normalize [x:y:z]
 
         Returns:
-            Normalized points
+            Normalized points with Minkowski norm = -1
+
+        Raises:
+            ValueError: if points are null or cannot be normalized to hyperboloid
         """
-        print("[DEBUG] normalize_points: input=", points)
-        norms = torch.norm(points[..., :-1], dim=-1, keepdim=True)
-        normalized = points / (norms + self.epsilon)
-        print("[DEBUG] normalize_points: norms=", norms, "normalized=", normalized)
-        return normalized
-    
+        # Ensure points are in homogeneous coordinates
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+
+        # Compute Minkowski norm
+        norm = self.inner_product(x, x)
+
+        # Check for null points
+        if torch.any(torch.abs(norm) < self.eps):
+            raise ValueError("Cannot normalize null points (Minkowski norm = 0)")
+
+        # Check if points are hyperbolic (negative norm)
+        if torch.any(norm > 0):
+            raise ValueError("Cannot normalize Euclidean points (positive norm)")
+
+        # Normalize to unit Minkowski norm
+        scale = torch.sqrt(torch.abs(norm))
+        x_norm = x / scale.unsqueeze(-1)
+
+        # Verify normalization
+        final_norm = self.inner_product(x_norm, x_norm)
+        if not torch.all(torch.abs(final_norm + 1.0) < self.eps):
+            raise ValueError("Failed to normalize points to hyperboloid")
+
+        return x_norm
+
+    def project(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Project points onto the hyperbolic manifold (Minkowski norm -1).
+        Reference: UHG.pdf, Ch. 3
+        """
+        return self.normalize_points(x)
+
+    def distance(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        Compute hyperbolic distance between points using the Minkowski inner product.
+        Reference: UHG.pdf, Ch. 4
+        d(x, y) = arccosh(-<x, y>), where <.,.> is the Minkowski inner product.
+        """
+        x = self.normalize_points(x)
+        y = self.normalize_points(y)
+        spatial_dot = torch.sum(x[..., :-1] * y[..., :-1], dim=-1)
+        time_dot = x[..., -1] * y[..., -1]
+        inner_prod = spatial_dot - time_dot
+        # Ensure inner product is <= -1 for acosh
+        inner_prod = torch.clamp(inner_prod, max=-1.0 - self.eps)
+        d = torch.acosh(-inner_prod)
+        return d
+
+    def inner_product(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the Minkowski inner product between two points or lines.
+        <a,b> = x₁x₂ + y₁y₂ - z₁z₂
+        """
+        return torch.sum(a * b * torch.tensor([1.0, 1.0, -1.0]), dim=-1)
+
+    def cross_ratio(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
+        """Compute cross-ratio of four points using 3x3 determinants (UHG projective geometry)."""
+        # Ensure points are in homogeneous coordinates
+        if a.dim() == 1:
+            a = a.unsqueeze(0)
+        if b.dim() == 1:
+            b = b.unsqueeze(0)
+        if c.dim() == 1:
+            c = c.unsqueeze(0)
+        if d.dim() == 1:
+            d = d.unsqueeze(0)
+
+        # Stack points for batch processing
+        # Each point is (..., 3), so stack to (..., 3, 3)
+        def det3(p, q, r):
+            # Stack last dimension to shape (..., 3, 3)
+            mat = torch.stack([p, q, r], dim=-2)
+            return torch.det(mat)
+
+        # Compute determinants for cross-ratio
+        det_abd = det3(a, b, d)
+        det_cbd = det3(c, b, d)
+        det_acd = det3(a, c, d)
+        det_bcd = det3(b, c, d)
+
+        # UHG cross-ratio formula (see UHG.pdf, Ch. 2):
+        # CR(a, b; c, d) = (|a b d| * |c b d|) / (|a c d| * |b c d|)
+        numer = det_abd * det_cbd
+        denom = det_acd * det_bcd
+
+        # Handle numerical stability
+        if torch.any(torch.abs(denom) < self.eps):
+            raise ValueError("Cross-ratio calculation unstable: denominator too small")
+
+        return numer / denom
+
+    def restore_cross_ratio(self, x: torch.Tensor, target_cr: torch.Tensor) -> torch.Tensor:
+        """
+        Restore the cross-ratio of points to a target value.
+        Reference: UHG.pdf, Ch. 2
+        """
+        return restore_cross_ratio(x, target_cr)
+
     def projective_average(self, points: Tensor, weights: Tensor) -> Tensor:
         """
         Compute weighted projective average of points.
@@ -407,7 +509,7 @@ class ProjectiveUHG:
             Weighted average point of shape (..., D)
         """
         # Normalize weights
-        weights = weights / (weights.sum(dim=-1, keepdim=True) + self.epsilon)
+        weights = weights / (weights.sum(dim=-1, keepdim=True) + self.eps)
         
         # Expand weights for broadcasting
         # Add extra dimensions to match points shape
@@ -418,26 +520,9 @@ class ProjectiveUHG:
         avg = torch.sum(points * weights, dim=-2)
         
         # Ensure last component is 1 for homogeneous coordinates
-        avg = avg / (torch.abs(avg[..., -1:]) + self.epsilon)
+        avg = avg / (torch.abs(avg[..., -1:]) + self.eps)
         
         return avg
-    
-    def distance(self, x: Tensor, y: Tensor) -> Tensor:
-        """
-        Compute hyperbolic distance between points.
-        d(x,y) = acosh(-<x,y>)
-        """
-        # Normalize points
-        x = self.normalize_points(x)
-        y = self.normalize_points(y)
-        
-        # Compute inner product
-        inner_prod = -self.hyperbolic_dot(x, y)
-        
-        # Ensure inner product is >= 1 for acosh
-        inner_prod = torch.clamp(inner_prod, min=1.0 + self.epsilon)
-        
-        return torch.acosh(inner_prod)
     
     def meet(self, line: Tensor, point: Tensor) -> Tensor:
         """
@@ -487,7 +572,7 @@ class ProjectiveUHG:
             Aggregated point [..., D]
         """
         # Normalize weights
-        weights = weights / (weights.sum(dim=-1, keepdim=True) + self.epsilon)
+        weights = weights / (weights.sum(dim=-1, keepdim=True) + self.eps)
         
         # Reshape points and weights for proper broadcasting
         B = points.size(0)  # Batch size
@@ -501,27 +586,11 @@ class ProjectiveUHG:
         # Normalize result
         return self.normalize_points(weighted_sum)
     
-    def is_null_point(self, point: Tensor) -> Tensor:
-        """
-        Check if a point is null in hyperbolic space.
-        A point [x:y:z] is null if x² + y² = z².
-
-        Args:
-            point: Point to check [..., 3]
-
-        Returns:
-            Boolean tensor indicating if point is null
-        """
-        # Handle batched points
-        if point.dim() > 1:
-            # Check each point in the batch
-            return torch.stack([self.is_null_point(p) for p in point])
-
-        # Extract coordinates
-        x, y, z = point[0], point[1], point[2]
-
-        # Check if point is null
-        return torch.abs(x**2 + y**2 - z**2) < self.epsilon
+    def is_null_point(self, p: torch.Tensor) -> torch.Tensor:
+        """Check if point lies on the null cone."""
+        # Compute Minkowski norm
+        norm = self.inner_product(p, p)
+        return torch.abs(norm) < self.eps
     
     def null_point(self, t: Tensor, u: Tensor) -> Tensor:
         """
@@ -541,7 +610,7 @@ class ProjectiveUHG:
         # Create null point
         x = t
         y = u
-        z = torch.sqrt(t**2 + u**2 + self.epsilon)
+        z = torch.sqrt(t**2 + u**2 + self.eps)
         
         return torch.stack([x, y, z], dim=-1)
 
@@ -606,7 +675,7 @@ class ProjectiveUHG:
            m₂ = [x₁-x₂ : y₁-y₂ : z₁-z₂]
         """
         # Handle special cases
-        if torch.allclose(a1, a2, rtol=self.epsilon):
+        if torch.allclose(a1, a2, rtol=self.eps):
             return a1, None
             
         # Check if both points are null
@@ -692,26 +761,12 @@ class ProjectiveUHG:
         print("\n✅ All midpoint properties verified")
         return True
     
-    def is_null_line(self, line: Tensor) -> bool:
-        """
-        Check if a line is null (contains its pole).
-        A line (l:m:n) is null when l² + m² = n²
-        
-        Args:
-            line: Line in projective coordinates (l:m:n)
-            
-        Returns:
-            Boolean tensor indicating if line is null
-        """
-        # First normalize line
-        line = self.normalize_points(line)
-        
-        # Get components
-        l, m, n = line[..., 0], line[..., 1], line[..., 2]
-        
-        # Line is null if l² + m² = n²
-        norm = l*l + m*m - n*n
-        return torch.abs(norm) < self.epsilon
+    def is_null_line(self, l: torch.Tensor) -> torch.Tensor:
+        """Check if line is null (satisfies l² + m² = n²)."""
+        # Compute line norm
+        space_norm = torch.sum(l[..., :-1] * l[..., :-1], dim=-1)
+        time_norm = l[..., -1] * l[..., -1]
+        return torch.abs(space_norm - time_norm) < self.eps
     
     def transform_verify_midpoints(self, a1: Tensor, a2: Tensor, matrix: Tensor) -> bool:
         """
@@ -747,19 +802,11 @@ class ProjectiveUHG:
         Verify the triple quad formula from UHG.pdf.
         For any three points, the quadrances satisfy:
         (q1 + q2 + q3)² = 2(q1² + q2² + q3²) + 4q1q2q3
-
-        Args:
-            q1: First quadrance
-            q2: Second quadrance
-            q3: Third quadrance
-
-        Returns:
-            True if the formula is satisfied
+        Reference: UHG.pdf, Ch. 2
         """
         # Calculate both sides of the formula
         lhs = (q1 + q2 + q3)**2
         rhs = 2*(q1**2 + q2**2 + q3**2) + 4*q1*q2*q3
-
         # Check if they are equal within numerical tolerance
         return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
 
@@ -768,19 +815,11 @@ class ProjectiveUHG:
         Verify the triple spread formula from UHG.pdf.
         For any three points, the spreads satisfy:
         (S1 + S2 + S3)² = 2(S1² + S2² + S3²) + 4S1S2S3
-
-        Args:
-            S1: First spread
-            S2: Second spread
-            S3: Third spread
-
-        Returns:
-            True if the formula is satisfied
+        Reference: UHG.pdf, Ch. 2
         """
         # Calculate both sides of the formula
         lhs = (S1 + S2 + S3)**2
         rhs = 2*(S1**2 + S2**2 + S3**2) + 4*S1*S2*S3
-
         # Check if they are equal within numerical tolerance
         return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
 
@@ -789,22 +828,11 @@ class ProjectiveUHG:
         Verify the cross law from UHG.pdf.
         For any three points, the quadrances and spreads satisfy:
         (q1 + q2 - q3)² = 4q1q2(1 - S3)
-
-        Args:
-            q1: First quadrance
-            q2: Second quadrance
-            q3: Third quadrance
-            S1: First spread
-            S2: Second spread
-            S3: Third spread
-
-        Returns:
-            True if the law is satisfied
+        Reference: UHG.pdf, Ch. 2
         """
         # Calculate both sides of the law
         lhs = (q1 + q2 - q3)**2
         rhs = 4*q1*q2*(1 - S3)
-
         # Check if they are equal within numerical tolerance
         return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
 
@@ -813,20 +841,11 @@ class ProjectiveUHG:
         Verify the dual cross law from UHG.pdf.
         For any three points, the spreads and quadrance satisfy:
         (S1 + S2 - S3)² = 4S1S2(1 - q1)
-
-        Args:
-            S1: First spread
-            S2: Second spread
-            S3: Third spread
-            q1: First quadrance
-
-        Returns:
-            True if the law is satisfied
+        Reference: UHG.pdf, Ch. 2
         """
         # Calculate both sides of the law
         lhs = (S1 + S2 - S3)**2
         rhs = 4*S1*S2*(1 - q1)
-
         # Check if they are equal within numerical tolerance
         return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
 
@@ -848,7 +867,7 @@ class ProjectiveUHG:
         if q3 is None:
             return expected_q3
         else:
-            return torch.abs(q3 - expected_q3) < self.epsilon
+            return torch.abs(q3 - expected_q3) < self.eps
         
     def dual_pythagoras(self, S1: Tensor, S2: Tensor, S3: Optional[Tensor] = None) -> Tensor:
         """
@@ -868,7 +887,7 @@ class ProjectiveUHG:
         if S3 is None:
             return expected_S3
         else:
-            return torch.abs(S3 - expected_S3) < self.epsilon
+            return torch.abs(S3 - expected_S3) < self.eps
 
     def spread_quadrance_duality(self, L1: Tensor, L2: Tensor) -> bool:
         """
@@ -883,18 +902,13 @@ class ProjectiveUHG:
         """
         spread_val = self.spread(L1, L2)
         quad_val = self.quadrance(self.dual_line_to_point(L1), self.dual_line_to_point(L2))
-        return torch.abs(spread_val - quad_val) < self.epsilon
+        return torch.abs(spread_val - quad_val) < self.eps
         
     def dual_line_to_point(self, line: Tensor) -> Tensor:
         """
         Convert a line to its dual point.
         In UHG, the dual of a line (l:m:n) is the point [l:m:n].
-        
-        Args:
-            line: Line in projective coordinates (l:m:n)
-            
-        Returns:
-            Dual point [l:m:n]
+        Reference: UHG.pdf, Ch. 2
         """
         # In UHG, the dual of a line (l:m:n) is simply the point [l:m:n]
         # This is because we're using the same bilinear form for both points and lines
@@ -904,12 +918,7 @@ class ProjectiveUHG:
         """
         Convert a point to its dual line.
         In UHG, the dual of a point [x:y:z] is the line (x:y:z).
-        
-        Args:
-            point: Point in projective coordinates [x:y:z]
-            
-        Returns:
-            Dual line (x:y:z)
+        Reference: UHG.pdf, Ch. 2
         """
         # In UHG, the dual of a point [x:y:z] is simply the line (x:y:z)
         # This is because we're using the same bilinear form for both points and lines
@@ -918,85 +927,51 @@ class ProjectiveUHG:
     def point_lies_on_line(self, point: Tensor, line: Tensor) -> bool:
         """
         Check if a point lies on a line using the incidence relation in projective geometry.
-        
         In projective geometry, a point [x:y:z] lies on a line (a:b:c) if ax + by + cz = 0.
-        
-        Args:
-            point: Tensor representing a point [x:y:z]
-            line: Tensor representing a line (a:b:c)
-            
-        Returns:
-            Boolean indicating whether the point lies on the line
+        Reference: UHG.pdf, Ch. 2
         """
         # Calculate the dot product
         dot_product = torch.sum(point * line)
-        
         # Check if the dot product is close to zero (within epsilon)
-        return torch.abs(dot_product) < self.epsilon
+        return torch.abs(dot_product) < self.eps
 
-    def cross_ratio(self, v1: Tensor, v2: Tensor, u1: Tensor, u2: Tensor) -> Tensor:
-        """
-        Calculate the cross-ratio of four points.
-        The cross-ratio is a projective invariant.
-
-        Args:
-            v1: First point [x₁:y₁:z₁]
-            v2: Second point [x₂:y₂:z₂]
-            u1: Third point [x₃:y₃:z₃]
-            u2: Fourth point [x₄:y₄:z₄]
-
-        Returns:
-            Cross-ratio of the four points
-
-        Raises:
-            ValueError: if any point is null
-        """
-        print("[DEBUG] cross_ratio: v1=", v1, "v2=", v2, "u1=", u1, "u2=", u2)
-        # Use determinants for projective cross-ratio
-        def det2(a, b):
-            return a[0]*b[1] - a[1]*b[0]
-        # For 3D, project to 2D by dropping last coordinate
-        v1_2d = v1[..., :2]
-        v2_2d = v2[..., :2]
-        u1_2d = u1[..., :2]
-        u2_2d = u2[..., :2]
-        num = det2(v1_2d, u1_2d) * det2(v2_2d, u2_2d)
-        denom = det2(v1_2d, u2_2d) * det2(v2_2d, u1_2d)
-        print("[DEBUG] cross_ratio: num=", num, "denom=", denom)
-        if torch.any(denom.abs() < self.epsilon):
-            print("[WARNING] cross_ratio: denominator near zero.")
-        cr = num / (denom + self.epsilon)
-        print("[DEBUG] cross_ratio: cr=", cr)
-        return cr
-
-    def add(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
-        """
-        Add two points in projective space using pure projective operations.
-        This is done by computing the weighted sum and normalizing.
-        
-        Args:
-            p1: First point [..., D]
-            p2: Second point [..., D]
-            
-        Returns:
-            Sum point [..., D]
-        """
-        # Ensure inputs are tensors
-        p1 = torch.as_tensor(p1)
-        p2 = torch.as_tensor(p2)
-        
-        # Compute weighted sum
-        sum_point = p1 + p2
-        
-        # Normalize result
-        return self.normalize_points(sum_point)
-    
     def manifold(self) -> torch.Tensor:
         """
         Get the manifold structure matrix for UHG.
         In UHG, we use the hyperbolic form J = diag(1, 1, -1).
-        
-        Returns:
-            Manifold structure matrix J
+        Reference: UHG.pdf, Ch. 3
         """
         return torch.diag(torch.tensor([1.0, 1.0, -1.0]))
+
+    def midpoint(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate the midpoint between two points on the hyperboloid.
+        Reference: UHG.pdf, Ch. 2, Section 2.4
+
+        Args:
+            a: First point [x₁:y₁:z₁]
+            b: Second point [x₂:y₂:z₂]
+
+        Returns:
+            Midpoint between a and b
+
+        Raises:
+            ValueError: if either point is null or not on hyperboloid
+        """
+        # Ensure points are normalized to hyperboloid
+        try:
+            a_norm = self.normalize_points(a)
+            b_norm = self.normalize_points(b)
+        except ValueError as e:
+            raise ValueError(f"Points must be on hyperboloid: {e}")
+
+        # Calculate midpoint using UHG formula
+        # m = (a + b)/√(2(1 - a·b))
+        a_dot_b = self.inner_product(a_norm, b_norm)
+        scale = torch.sqrt(2 * (1 - a_dot_b))
+        m = (a_norm + b_norm) / scale.unsqueeze(-1)
+
+        # Normalize midpoint to ensure it's on hyperboloid
+        m = self.normalize_points(m)
+
+        return m

@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 import math
 
 from ..projective import ProjectiveUHG
-from uhg.manifolds import HyperbolicManifold
 from ..utils.cross_ratio import compute_cross_ratio, restore_cross_ratio
 from .layers.linear import HyperbolicLinear
 
@@ -15,40 +14,38 @@ class HyperbolicAttention(nn.Module):
     """
     def __init__(
         self,
-        manifold: HyperbolicManifold,
-        in_channels: int,
+        in_features: int,
+        out_features: int,
         num_heads: int = 1,
         dropout: float = 0.0,
         concat: bool = True
     ):
         super().__init__()
-        self.manifold = manifold
         self.uhg = ProjectiveUHG()
-        self.in_channels = in_channels
+        self.in_features = in_features
+        self.out_features = out_features
         self.num_heads = num_heads
         self.dropout = dropout
         self.concat = concat
 
-        # Attention parameters (projective transforms for each head)
-        self.query = HyperbolicLinear(manifold, in_channels, in_channels * num_heads)
-        self.key = HyperbolicLinear(manifold, in_channels, in_channels * num_heads)
-        self.value = HyperbolicLinear(manifold, in_channels, in_channels * num_heads)
+        # Projection matrices
+        self.query = nn.Linear(in_features, out_features * num_heads)
+        self.key = nn.Linear(in_features, out_features * num_heads)
+        self.value = nn.Linear(in_features, out_features * num_heads)
         
-        if concat:
-            self.proj = HyperbolicLinear(manifold, in_channels * num_heads, in_channels)
-        else:
-            self.proj = HyperbolicLinear(manifold, in_channels, in_channels)
-            
+        # Output projection
+        self.out_proj = nn.Linear(out_features * num_heads, out_features)
+        
         self.dropout_layer = nn.Dropout(dropout)
         self.edge_mlp = None
         self.reset_parameters()
 
     def reset_parameters(self):
-        # Initialize hyperbolic linear layers
+        # Initialize linear layers
         self.query.reset_parameters()
         self.key.reset_parameters()
         self.value.reset_parameters()
-        self.proj.reset_parameters()
+        self.out_proj.reset_parameters()
         
         if self.edge_mlp is not None:
             nn.init.xavier_uniform_(self.edge_mlp.weight)
@@ -64,12 +61,12 @@ class HyperbolicAttention(nn.Module):
     ) -> torch.Tensor:
         """UHG-compliant forward pass (no tangent space, pure projective geometry).
         Args:
-            x: Node features [N, in_channels]
+            x: Node features [N, in_features]
             edge_index: [2, E]
             edge_attr: [E, edge_dim] (optional)
             mask: [E] or [N, N] (optional)
         Returns:
-            Updated node features [N, in_channels]
+            Updated node features [N, out_features]
         """
         N = x.size(0)
         
@@ -82,9 +79,9 @@ class HyperbolicAttention(nn.Module):
         x_proj = self.uhg.normalize_points(x)
         
         # Linear projections (per head)
-        queries = self.query(x_proj).view(N, self.num_heads, self.in_channels)
-        keys = self.key(x_proj).view(N, self.num_heads, self.in_channels)
-        values = self.value(x_proj).view(N, self.num_heads, self.in_channels)
+        queries = self.query(x_proj).view(N, self.num_heads, self.out_features)
+        keys = self.key(x_proj).view(N, self.num_heads, self.out_features)
+        values = self.value(x_proj).view(N, self.num_heads, self.out_features)
         
         row, col = edge_index
         
@@ -94,15 +91,15 @@ class HyperbolicAttention(nn.Module):
 
         # Edge features
         if edge_attr is not None:
-            if edge_attr.shape[-1] != self.in_channels:
+            if edge_attr.shape[-1] != self.in_features:
                 if self.edge_mlp is None or self.edge_mlp.in_features != edge_attr.shape[-1]:
-                    self.edge_mlp = nn.Linear(edge_attr.shape[-1], self.in_channels).to(edge_attr.device)
-                edge_proj = self.edge_mlp(edge_attr)  # [E, in_channels]
+                    self.edge_mlp = nn.Linear(edge_attr.shape[-1], self.in_features).to(edge_attr.device)
+                edge_proj = self.edge_mlp(edge_attr)  # [E, in_features]
             else:
-                edge_proj = edge_attr  # [E, in_channels]
+                edge_proj = edge_attr  # [E, in_features]
             
-            # Expand edge_proj to [E, num_heads, in_channels] for value update
-            edge_proj_heads = edge_proj.unsqueeze(1).expand(-1, self.num_heads, -1)  # [E, num_heads, in_channels]
+            # Expand edge_proj to [E, num_heads, in_features] for value update
+            edge_proj_heads = edge_proj.unsqueeze(1).expand(-1, self.num_heads, -1)  # [E, num_heads, in_features]
             # For attention scores, project edge features to a scalar per head
             edge_proj_score = edge_proj_heads.sum(dim=-1)  # [E, num_heads]
             
@@ -121,25 +118,25 @@ class HyperbolicAttention(nn.Module):
         alpha = self.dropout_layer(alpha)
 
         # Aggregate values
-        out = torch.zeros(N, self.num_heads, self.in_channels, device=x.device)
-        value_messages = values[col]  # [E, num_heads, in_channels]
+        out = torch.zeros(N, self.num_heads, self.out_features, device=x.device)
+        value_messages = values[col]  # [E, num_heads, out_features]
         if edge_proj_heads is not None:
-            value_messages = value_messages + edge_proj_heads  # [E, num_heads, in_channels]
+            value_messages = value_messages + edge_proj_heads  # [E, num_heads, out_features]
         
         # Multiply by attention weights
-        value_messages = value_messages * alpha.unsqueeze(-1)  # [E, num_heads, in_channels]
+        value_messages = value_messages * alpha.unsqueeze(-1)  # [E, num_heads, out_features]
         
         # Scatter add to nodes
-        out.scatter_add_(0, row.unsqueeze(-1).unsqueeze(-1).expand(-1, self.num_heads, self.in_channels), value_messages)
+        out.scatter_add_(0, row.unsqueeze(-1).unsqueeze(-1).expand(-1, self.num_heads, self.out_features), value_messages)
 
         # Concatenate or average heads
         if self.concat:
-            out = out.view(N, self.num_heads * self.in_channels)
+            out = out.view(N, self.num_heads * self.out_features)
         else:
             out = out.mean(dim=1)
 
         # Output projection
-        out = self.proj(out)
+        out = self.out_proj(out)
 
         # Restore cross-ratio if possible
         if has_cr:
@@ -159,16 +156,16 @@ class HyperbolicAttention(nn.Module):
         k = self.uhg.normalize_points(k)
         
         # Compute hyperbolic inner product
-        scores = self.manifold.inner_product(q, k)
+        scores = self.uhg.inner_product(q, k)
         
         # Scale scores
-        scores = scores / math.sqrt(self.in_channels)
+        scores = scores / math.sqrt(self.in_features)
         
         return scores
 
     def extra_repr(self) -> str:
-        return (f'in_channels={self.in_channels}, num_heads={self.num_heads}, '
-                f'dropout={self.dropout}, concat={self.concat}')
+        return (f'in_features={self.in_features}, out_features={self.out_features}, '
+                f'num_heads={self.num_heads}, dropout={self.dropout}, concat={self.concat}')
 
 def test_hyperbolic_attention():
     """Test function for HyperbolicAttention module."""
@@ -177,24 +174,21 @@ def test_hyperbolic_attention():
     # Test parameters
     batch_size = 4
     num_nodes = 10
-    in_channels = 8
+    in_features = 8
     num_heads = 2
     edge_dim = 6
     
-    # Create a simple hyperbolic manifold
-    manifold = HyperbolicManifold()
-    
     # Initialize attention module
     attention = HyperbolicAttention(
-        manifold=manifold,
-        in_channels=in_channels,
+        in_features=in_features,
+        out_features=in_features,
         num_heads=num_heads,
         dropout=0.1,
         concat=True
     )
     
     # Create random input data
-    x = torch.randn(num_nodes, in_channels)  # Node features
+    x = torch.randn(num_nodes, in_features)  # Node features
     edge_index = torch.tensor([
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],  # source nodes
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]   # target nodes
