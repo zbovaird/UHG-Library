@@ -17,8 +17,8 @@ Universal Hyperbolic Geometry (UHG) provides a powerful framework for representi
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/uhg-anomaly-detection.git
-cd uhg-anomaly-detection
+git clone https://github.com/zbovaird/UHG-Library.git
+cd UHG-Library
 ```
 
 2. Install the required dependencies:

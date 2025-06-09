@@ -14,7 +14,7 @@ def get_version():
 
 setup(
     name="uhg",
-    version="0.3.5",
+    version="0.3.6",
     packages=find_packages(),
     install_requires=[
         "numpy>=1.19.0",
@@ -35,13 +35,14 @@ setup(
     },
     author="UHG Library Team",
     author_email="info@uhglibrary.org",
-    description="Universal Hyperbolic Geometry Library",
+    description="Universal Hyperbolic Geometry Library for Machine Learning",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/zachbovaird/UHG-Library",
+    url="https://github.com/zbovaird/UHG-Library",
     project_urls={
-        "Bug Tracker": "https://github.com/zachbovaird/UHG-Library/issues",
-        "Source Code": "https://github.com/zachbovaird/UHG-Library"
+        "Bug Tracker": "https://github.com/zbovaird/UHG-Library/issues",
+        "Source Code": "https://github.com/zbovaird/UHG-Library",
+        "Documentation": "https://github.com/zbovaird/UHG-Library/tree/main/docs"
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
