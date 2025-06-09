@@ -93,4 +93,79 @@ def uhg_aggregate(points: torch.Tensor, attention: torch.Tensor) -> torch.Tensor
     Returns:
         Aggregated points in UHG space
     """
-    return uhg_weighted_midpoint(points.unsqueeze(-3), attention) 
+    return uhg_weighted_midpoint(points.unsqueeze(-3), attention)
+
+"""UHG-compliant functional operations."""
+
+def scatter_mean_custom(src: torch.Tensor, index: torch.Tensor, dim: int = 0, dim_size: int = None) -> torch.Tensor:
+    """UHG-compliant scatter mean operation.
+    
+    Args:
+        src: Source tensor of shape [E, D] where E is number of edges and D is feature dimension
+        index: Index tensor of shape [E] indicating where to scatter
+        dim: Dimension along which to scatter
+        dim_size: Size of output tensor's scatter dimension
+        
+    Returns:
+        Tensor of shape [N, D] where N is number of nodes
+    """
+    if dim_size is None:
+        dim_size = index.max().item() + 1
+        
+    # Initialize output tensor
+    out = torch.zeros(dim_size, src.size(1), device=src.device)
+    
+    # Add features
+    out = out.index_add_(0, index, src)
+    
+    # Compute counts for averaging
+    ones = torch.ones((src.size(0), 1), device=src.device)
+    count = torch.zeros(dim_size, 1, device=src.device).index_add_(0, index, ones)
+    count[count == 0] = 1
+    
+    # Average features
+    out = out / count
+    
+    return out
+
+def uhg_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """UHG-compliant normalization that preserves geometric structure.
+    
+    Args:
+        x: Input tensor with shape [..., D+1] where last dimension is homogeneous coordinate
+        eps: Small value for numerical stability
+        
+    Returns:
+        Normalized tensor with same shape as input
+    """
+    features = x[..., :-1]
+    homogeneous = x[..., -1:]
+    
+    # Compute UHG norm
+    norm = torch.sqrt(torch.clamp(
+        torch.sum(features ** 2, dim=-1, keepdim=True) - homogeneous ** 2,
+        min=eps
+    ))
+    
+    # Normalize features
+    features = features / norm
+    
+    # Ensure homogeneous coordinate is positive
+    homogeneous = torch.sign(homogeneous) * torch.ones_like(homogeneous)
+    
+    return torch.cat([features, homogeneous], dim=-1)
+
+def uhg_relu(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """UHG-compliant ReLU that preserves geometric structure.
+    
+    Args:
+        x: Input tensor
+        eps: Small value for numerical stability
+        
+    Returns:
+        Activated tensor with same shape as input
+    """
+    # Apply ReLU while preserving norm ratios
+    activated = F.relu(x)
+    norm = torch.norm(activated, p=2, dim=-1, keepdim=True)
+    return activated / norm.clamp(min=eps) 

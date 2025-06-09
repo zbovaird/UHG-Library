@@ -1,107 +1,119 @@
-# Universal Hyperbolic Geometry Library
+# UHG-Based Anomaly Detection
 
-[![PyPI version](https://badge.fury.io/py/uhg.svg)](https://badge.fury.io/py/uhg)
-[![License](https://img.shields.io/github/license/zachbovaird/UHG-Library.svg)](https://github.com/zachbovaird/UHG-Library/blob/main/LICENSE)
-[![Build Status](https://github.com/zachbovaird/UHG-Library/workflows/CI/badge.svg)](https://github.com/zachbovaird/UHG-Library/actions)
-[![Code Coverage](https://codecov.io/gh/zachbovaird/UHG-Library/branch/main/graph/badge.svg)](https://codecov.io/gh/zachbovaird/UHG-Library)
+This repository contains an implementation of anomaly detection using Universal Hyperbolic Geometry (UHG) principles. The code leverages the UHG library to perform geometric operations in hyperbolic space.
 
-A PyTorch library for Universal Hyperbolic Geometry (UHG) and Hyperbolic Graph Neural Networks. All operations are performed directly in hyperbolic space without tangent space mappings.
+## Overview
+
+Universal Hyperbolic Geometry (UHG) provides a powerful framework for representing complex hierarchical data. This implementation uses UHG principles to detect anomalies in network traffic data by embedding the data in hyperbolic space and identifying points that deviate from the normal patterns.
+
+## Key Features
+
+- UHG-based graph neural network for anomaly detection
+- Efficient implementation of UHG operations using the UHG library
+- Support for large-scale datasets through batched processing
+- Visualization tools for analyzing embeddings and anomaly scores
 
 ## Installation
 
-### Basic Installation
-
+1. Clone this repository:
 ```bash
-pip install uhg
+git clone https://github.com/zbovaird/UHG-Library.git
+cd UHG-Library
 ```
 
-### With GPU Support
-
+2. Install the required dependencies:
 ```bash
-pip install uhg[gpu]
+pip install -r requirements.txt
 ```
 
-### CPU-Only Version
+## Usage
 
-```bash
-pip install uhg[cpu]
-```
-
-### Development Version
-
-```bash
-pip install uhg[dev]
-```
-
-### Documentation Tools
-
-```bash
-pip install uhg[docs]
-```
-
-## Quick Start
+### Basic Usage
 
 ```python
-import uhg
-import torch
+from uhg_anomaly_detection_refactored import load_and_preprocess_data, create_graph_data, UHGGraphNN, UHGAnomalyLoss
 
-# Create hyperbolic tensors
-manifold = uhg.LorentzManifold()
-x = uhg.HyperbolicTensor([1.0, 0.0, 0.0], manifold=manifold)
-y = uhg.HyperbolicTensor([0.0, 1.0, 0.0], manifold=manifold)
+# Load and preprocess data
+features, labels, feature_info = load_and_preprocess_data("your_data.csv")
 
-# Compute hyperbolic distance
-dist = uhg.distance(x, y)
+# Create graph data
+graph_data = create_graph_data(features, labels, k=5)
 
-# Create a hyperbolic neural network
-model = uhg.nn.layers.HyperbolicGraphConv(
-    manifold=manifold,
-    in_features=10,
-    out_features=5
+# Create model
+model = UHGGraphNN(
+    in_channels=features.shape[1],
+    hidden_channels=64,
+    embedding_dim=32,
+    num_layers=2,
+    dropout=0.2
 )
 
-# Use hyperbolic optimizer
-optimizer = uhg.optim.HyperbolicAdam(
-    model.parameters(),
-    manifold=manifold,
-    lr=0.01
-)
+# Create loss function
+criterion = UHGAnomalyLoss(spread_weight=0.1, quad_weight=1.0, margin=1.0)
+
+# Create optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+
+# Train the model
+model.train()
+for epoch in range(100):
+    optimizer.zero_grad()
+    z = model(graph_data.x, graph_data.edge_index)
+    loss = criterion(z, graph_data.edge_index)
+    loss.backward()
+    optimizer.step()
+    print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
+
+# Generate embeddings
+model.eval()
+with torch.no_grad():
+    embeddings = model(graph_data.x, graph_data.edge_index).cpu().numpy()
 ```
 
-## Features
+### Using UHG Utilities Directly
 
-- Pure UHG implementation without tangent space operations
-- Hyperbolic neural network layers and models
-- Hyperbolic optimizers (Adam, SGD)
-- Hyperbolic samplers (HMC, Langevin)
-- Graph neural networks in hyperbolic space
-- Comprehensive documentation and examples
+The `uhg_utils.py` file provides a clean interface to the UHG library. You can use these utilities in your own code:
 
-## Platform Support
+```python
+from uhg_utils import uhg_quadrance, uhg_spread, uhg_cross_ratio, to_uhg_space
 
-- Linux (all major distributions)
-- macOS (including Apple Silicon)
-- Windows
-- Docker containers
-- Splunk environments
+# Convert points to UHG space
+points = to_uhg_space(your_data)
 
-## Documentation
+# Compute quadrance (UHG distance) between points
+distance = uhg_quadrance(points[0], points[1])
 
-Full documentation is available in the [docs](docs/) directory and in the [GitHub repository](https://github.com/zachbovaird/UHG-Library).
+# Compute spread (UHG angle) between lines
+spread = uhg_spread(line1, line2)
+
+# Compute cross-ratio of four points
+cr = uhg_cross_ratio(p1, p2, p3, p4)
+```
+
+## File Structure
+
+- `uhg_utils.py`: Utility functions that provide a clean interface to the UHG library
+- `uhg_anomaly_detection_refactored.py`: Main implementation of UHG-based anomaly detection
+- `requirements.txt`: List of required dependencies
+
+## UHG Library Integration
+
+This implementation uses the UHG library for core geometric operations. The `uhg_utils.py` file serves as a bridge between the application code and the UHG library, providing a clean interface and handling edge cases.
+
+Key UHG operations used:
+- `quadrance`: Computes the squared distance between points in hyperbolic space
+- `spread`: Computes the squared angle between lines in hyperbolic space
+- `cross_ratio`: Computes the cross-ratio of four points, a projective invariant
+- `normalize_points`: Normalizes points according to UHG conventions
+- `join_points`: Computes the line joining two points
+- `meet_line_point`: Computes the intersection of a line and a point
+
+## References
+
+- Norman J. Wildberger, "Universal Hyperbolic Geometry I: Trigonometry", Geometriae Dedicata, 2013
+- Norman J. Wildberger, "Universal Hyperbolic Geometry II: A pictorial overview", KoG, 2013
+- Norman J. Wildberger, "Universal Hyperbolic Geometry III: First Steps in Projective Triangle Geometry", KoG, 2014
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Citation
-
-If you use UHG in your research, please cite:
-
-```bibtex
-@software{uhg2023,
-  title = {UHG: Universal Hyperbolic Geometry Library},
-  author = {Bovaird, Zach},
-  year = {2023},
-  url = {https://github.com/zachbovaird/UHG-Library}
-}
-```
+MIT License

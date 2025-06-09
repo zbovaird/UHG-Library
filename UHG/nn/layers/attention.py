@@ -2,171 +2,150 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Union, Tuple
-from .base import HyperbolicLayer
-from ...manifolds import Manifold
+from .base import ProjectiveLayer
+from ...projective import ProjectiveUHG
 
-class HyperbolicAttention(HyperbolicLayer):
+class UHGAttentionLayer(ProjectiveLayer):
+    """UHG-compliant attention layer.
+    
+    This layer implements attention mechanisms following UHG principles,
+    ensuring all operations preserve cross-ratios and hyperbolic structure.
     """
-    Hyperbolic Attention Layer.
-    
-    This layer implements attention mechanisms directly in hyperbolic space
-    using projective geometry, without any tangent space mappings. The
-    implementation follows UHG.pdf principles for hyperbolic transformations.
-    
-    The attention scores are computed using hyperbolic distances and
-    cross-ratios to ensure all operations preserve hyperbolic structure.
-    
-    References:
-        - Chapter 9.4: Hyperbolic Attention
-        - Chapter 9.4.1: Computing Attention Scores
-        - Chapter 9.4.2: Attention-based Message Passing
-    """
-    
     def __init__(
         self,
-        manifold: Manifold,
+        in_features: int,
+        out_features: int,
+        num_heads: int = 1,
+        dropout: float = 0.0,
+        bias: bool = True
+    ):
+        super().__init__(in_features, out_features)
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.bias = bias
+        
+        # Initialize attention parameters
+        self.query = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        self.key = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        self.value = nn.Parameter(torch.Tensor(num_heads, out_features, in_features))
+        
+        if bias:
+            self.query_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+            self.key_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+            self.value_bias = nn.Parameter(torch.Tensor(num_heads, out_features))
+        else:
+            self.register_parameter('query_bias', None)
+            self.register_parameter('key_bias', None)
+            self.register_parameter('value_bias', None)
+            
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        """Initialize parameters following UHG principles."""
+        for param in [self.query, self.key, self.value]:
+            nn.init.kaiming_uniform_(param, a=2**0.5)
+            
+        if self.bias:
+            for param in [self.query_bias, self.key_bias, self.value_bias]:
+                nn.init.zeros_(param)
+                
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass implementing UHG attention.
+        
+        Args:
+            x: Input tensor of shape (..., in_features)
+            
+        Returns:
+            Attention output of shape (..., out_features)
+        """
+        # Project inputs to query, key, value spaces
+        q = torch.einsum('...i,hoi->...ho', x, self.query)
+        k = torch.einsum('...i,hoi->...ho', x, self.key)
+        v = torch.einsum('...i,hoi->...ho', x, self.value)
+        
+        if self.bias:
+            q = q + self.query_bias
+            k = k + self.key_bias
+            v = v + self.value_bias
+            
+        # Compute attention scores using cross-ratios
+        scores = []
+        for h in range(self.num_heads):
+            head_scores = []
+            for i in range(q.size(-2)):
+                row_scores = []
+                for j in range(k.size(-2)):
+                    # Use cross-ratio as attention score
+                    cr = self.uhg.cross_ratio(
+                        q[..., h, i].unsqueeze(-1),
+                        k[..., h, j].unsqueeze(-1),
+                        v[..., h, i].unsqueeze(-1),
+                        v[..., h, j].unsqueeze(-1)
+                    )
+                    row_scores.append(cr)
+                head_scores.append(torch.stack(row_scores, dim=-1))
+            scores.append(torch.stack(head_scores, dim=-2))
+        scores = torch.stack(scores, dim=-3)
+        
+        # Apply softmax and dropout
+        attention = F.softmax(scores, dim=-1)
+        if self.training:
+            attention = F.dropout(attention, p=self.dropout)
+            
+        # Compute weighted sum
+        output = torch.matmul(attention, v)
+        
+        # Average across heads
+        output = output.mean(dim=-2)
+        
+        return output
+
+class ProjectiveAttention(ProjectiveLayer):
+    """Attention layer using projective geometry.
+    
+    This layer implements attention mechanisms using pure projective geometry,
+    following UHG principles without any manifold concepts.
+    
+    Args:
+        in_features: Number of input features
+        out_features: Number of output features
+        heads: Number of attention heads
+        concat: Whether to concatenate attention heads
+        dropout: Dropout probability
+        bias: Whether to use bias
+    """
+    def __init__(
+        self,
         in_features: int,
         out_features: int,
         heads: int = 1,
         concat: bool = True,
         dropout: float = 0.0,
-        bias: bool = True,
-        use_metric: bool = True,
+        bias: bool = True
     ):
-        """
-        Initialize the hyperbolic attention layer.
-        
-        Args:
-            manifold: The hyperbolic manifold to operate on
-            in_features: Number of input features
-            out_features: Number of output features
-            heads: Number of attention heads
-            concat: Whether to concatenate or average attention heads
-            dropout: Dropout probability
-            bias: Whether to use bias
-            use_metric: Whether to use the hyperbolic metric for attention
-        """
-        super().__init__(manifold)
-        self.in_features = in_features
-        self.out_features = out_features
+        super().__init__(in_features, out_features, bias)
         self.heads = heads
         self.concat = concat
         self.dropout = dropout
-        self.use_metric = use_metric
         
         # Define output dimension based on concatenation
         self.out_dim = out_features * heads if concat else out_features
         
-        # Initialize transformations in hyperbolic space
-        self.weight = nn.Parameter(torch.Tensor(in_features, heads * out_features))
+        # Initialize attention weights as projective transformations
         self.att_weight = nn.Parameter(torch.Tensor(1, heads, 2 * out_features))
+        self.reset_attention_parameters()
         
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(self.out_dim))
-        else:
-            self.register_parameter('bias', None)
-            
-        self.reset_parameters()
-    
-    def reset_parameters(self):
-        """
-        Reset layer parameters using hyperbolic-aware initialization.
+    def reset_attention_parameters(self):
+        """Initialize attention parameters as projective transformations."""
+        matrix = self.uhg.get_projective_matrix(2 * self.out_features)
+        self.att_weight.data.copy_(matrix[:-1].view(1, 1, -1).repeat(1, self.heads, 1))
         
-        The initialization ensures weights respect the hyperbolic structure
-        and attention mechanism as described in UHG.pdf Chapter 9.4.
-        """
-        nn.init.xavier_uniform_(self.weight)
-        nn.init.xavier_uniform_(self.att_weight)
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
-    
-    def forward(
-        self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        size: Optional[Tuple[int, int]] = None,
-    ) -> torch.Tensor:
-        """
-        Forward pass of hyperbolic attention.
-        
-        Implements attention mechanism directly in hyperbolic space:
-        1. Transform node features using hyperbolic operations
-        2. Compute attention scores using hyperbolic distances
-        3. Apply attention-weighted aggregation in hyperbolic space
-        
-        Args:
-            x: Node feature matrix [num_nodes, in_features]
-            edge_index: Graph connectivity [2, num_edges]
-            size: Size of source and target tensors
-            
-        Returns:
-            Updated node features [num_nodes, out_features]
-        """
-        self.check_input(x)
-        
-        # Transform features in hyperbolic space
-        out = self._attention_forward(x, edge_index, size)
-        
-        self.check_output(out)
-        return out
-    
-    def _attention_forward(
-        self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        size: Optional[Tuple[int, int]] = None,
-    ) -> torch.Tensor:
-        """
-        Compute attention scores and apply attention mechanism.
-        
-        Args:
-            x: Node features in hyperbolic space
-            edge_index: Graph connectivity
-            size: Size of source and target tensors
-            
-        Returns:
-            Attention-weighted node features
-        """
-        # Apply feature transformation in hyperbolic space
-        x = self.manifold.proj_manifold(torch.matmul(x, self.weight))
-        x = x.view(-1, self.heads, self.out_features)
-        
-        # Compute source and target nodes
-        row, col = edge_index
-        
-        # Self-attention on the nodes
-        alpha = self._compute_attention_scores(x[row], x[col])
-        
-        # Apply dropout to attention scores
-        if self.training:
-            mask = torch.bernoulli(torch.full_like(alpha, 1 - self.dropout))
-            alpha = alpha * mask
-            alpha = alpha / (alpha.sum(dim=-1, keepdim=True) + 1e-8)
-        
-        # Apply attention weights in hyperbolic space
-        out = self._aggregate_neighbors(x, alpha, row, col, size)
-        
-        if not self.concat:
-            # Average attention heads using hyperbolic mean
-            out = self._hyperbolic_mean(out, dim=1)
-        else:
-            out = out.view(-1, self.out_dim)
-            
-        if self.bias is not None:
-            out = self.manifold.proj_manifold(out + self.bias)
-            
-        return out
-    
-    def _compute_attention_scores(
+    def compute_attention_scores(
         self,
         x_i: torch.Tensor,
-        x_j: torch.Tensor,
+        x_j: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Compute attention scores between node pairs.
-        
-        Uses hyperbolic distances or cross-ratios to compute attention
-        scores, ensuring all operations preserve hyperbolic structure.
+        """Compute attention scores using cross-ratios.
         
         Args:
             x_i: Source node features
@@ -175,62 +154,59 @@ class HyperbolicAttention(HyperbolicLayer):
         Returns:
             Attention scores
         """
-        if self.use_metric:
-            # Use hyperbolic distance for attention
-            dist = self.manifold.dist(x_i, x_j, keepdim=True)
-            return F.softmax(-dist, dim=-1)
-        else:
-            # Use cross-ratio for attention
-            origin = self.manifold.origin(x_i.shape[:-1])
-            cross_ratio = self.manifold.compute_cross_ratio(x_i, x_j, origin)
-            return F.softmax(-cross_ratio, dim=-1)
-    
-    def _aggregate_neighbors(
+        # Compute cross-ratio between points
+        cross_ratio = self.uhg.cross_ratio(x_i, x_j, x_i, x_j)
+        
+        # Convert to attention scores
+        return F.softmax(-cross_ratio, dim=-1)
+        
+    def forward(
         self,
         x: torch.Tensor,
-        alpha: torch.Tensor,
-        row: torch.Tensor,
-        col: torch.Tensor,
-        size: Optional[Tuple[int, int]],
+        edge_index: torch.Tensor,
+        size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
-        """
-        Aggregate neighbor features using attention weights.
-        
-        Performs weighted aggregation directly in hyperbolic space
-        using the attention scores.
+        """Forward pass of projective attention.
         
         Args:
             x: Node features
-            alpha: Attention weights
-            row: Source node indices
-            col: Target node indices
-            size: Size of source and target tensors
+            edge_index: Graph connectivity
+            size: Optional output size
             
         Returns:
-            Aggregated features
+            Attention-weighted features
         """
-        # Apply attention weights in hyperbolic space
-        weighted = self.manifold.weighted_midpoint(x[col], alpha.unsqueeze(-1))
+        # Transform features using projective geometry
+        x = super().forward(x)
+        x = x.view(-1, self.heads, self.out_features)
         
-        # Aggregate using hyperbolic Einstein midpoint
-        out = torch.zeros_like(x) if size is None else \
-              torch.zeros((size[1], self.heads, self.out_features), device=x.device)
-              
-        row_expand = row.view(-1, 1, 1).expand(-1, self.heads, self.out_features)
-        out.scatter_add_(0, row_expand, weighted)
+        # Get source and target nodes
+        row, col = edge_index
         
-        return self.manifold.proj_manifold(out)
-    
-    def _hyperbolic_mean(self, x: torch.Tensor, dim: int) -> torch.Tensor:
-        """
-        Compute the hyperbolic mean along a dimension.
+        # Compute attention scores using cross-ratios
+        alpha = self.compute_attention_scores(x[row], x[col])
         
-        Args:
-            x: Input tensor
-            dim: Dimension to average over
+        # Apply dropout to attention scores
+        if self.training:
+            alpha = F.dropout(alpha, p=self.dropout, training=True)
             
-        Returns:
-            Hyperbolic mean
-        """
-        weights = torch.ones(x.shape[dim], device=x.device) / x.shape[dim]
-        return self.manifold.weighted_midpoint(x, weights, dim=dim)
+        # Apply attention weights using projective transformations
+        out = torch.zeros_like(x)
+        for i in range(self.heads):
+            # Create projective transformation from attention weights
+            att_matrix = self.uhg.get_projective_matrix(self.out_features)
+            att_matrix = att_matrix * alpha[:, i].view(-1, 1, 1)
+            
+            # Transform features
+            head_out = self.uhg.transform(x[col, i], att_matrix)
+            
+            # Aggregate using projective operations
+            out[:, i] = self.uhg.transform(head_out, self.uhg.get_projective_matrix(self.out_features))
+            
+        if not self.concat:
+            # Average attention heads using projective mean
+            out = torch.mean(out, dim=1)
+        else:
+            out = out.view(-1, self.out_dim)
+            
+        return out

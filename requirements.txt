@@ -1,16 +1,13 @@
-torch>=1.7.0
-numpy>=1.19.0
-scipy>=1.5.0
+torch>=1.9.0
 torch-geometric>=2.0.0
-networkx>=2.5
+numpy>=1.20.0
+pandas>=1.1.0
+scikit-learn>=1.0.0
+matplotlib>=3.4.0
+plotly>=5.0.0
 tqdm>=4.50.0
-matplotlib>=3.3.0
-scikit-learn>=0.24.0
-
-# Development dependencies
-pytest>=6.0.0
-pytest-cov>=2.10.0
-black>=20.8b1
-isort>=5.7.0
-flake8>=3.8.0
-mypy>=0.800 
+seaborn>=0.11.0
+uhg>=0.3.2  # Universal Hyperbolic Geometry library
+geoopt>=0.5.0
+umap-learn>=0.5.3  # For UMAP dimensionality reduction
+scipy>=1.7.0  # For scientific computing and interpolation

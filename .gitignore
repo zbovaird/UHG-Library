@@ -29,4 +29,25 @@ venv.bak/
 .idea/
 .vscode/
 *.swp
-.DS_Store 
+.DS_Store
+
+# Test files
+test_intrusion_detection.py
+experiments/
+test_results/
+
+# Development notes
+suggestions.md
+notes/
+*.log
+
+# Implementation files
+uhg_intrusion_detection.py
+implementations/
+
+# Documentation
+docs/_build/
+docs/api/_build/
+*.pdf
+# Use cases directory
+use_cases/

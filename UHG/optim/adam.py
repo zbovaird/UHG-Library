@@ -1,9 +1,9 @@
 import torch
 from typing import List, Dict, Any, Optional, Callable
-from .optimizer import HyperbolicOptimizer
-from ..manifolds.base import Manifold
+from torch.optim import Optimizer
+from ..projective import ProjectiveUHG
 
-class HyperbolicAdam(HyperbolicOptimizer):
+class HyperbolicAdam(Optimizer):
     """Hyperbolic version of Adam optimizer.
     
     All operations are performed directly in hyperbolic space using UHG principles.
@@ -12,7 +12,6 @@ class HyperbolicAdam(HyperbolicOptimizer):
     
     Args:
         params: Iterable of parameters to optimize
-        manifold: The hyperbolic manifold to operate on
         lr: Learning rate
         betas: Coefficients for computing running averages
         eps: Term added for numerical stability
@@ -21,8 +20,7 @@ class HyperbolicAdam(HyperbolicOptimizer):
     """
     def __init__(
         self,
-        params: List[torch.Tensor],
-        manifold: Manifold,
+        params,
         lr: float = 1e-3,
         betas: tuple = (0.9, 0.999),
         eps: float = 1e-8,
@@ -47,7 +45,8 @@ class HyperbolicAdam(HyperbolicOptimizer):
             weight_decay=weight_decay,
             amsgrad=amsgrad
         )
-        super().__init__(params, manifold, defaults)
+        super().__init__(params, defaults)
+        self.uhg = ProjectiveUHG()
         
     def init_state(self, p: torch.Tensor, state: Dict[str, Any]) -> None:
         """Initialize optimizer state for parameter.
@@ -90,9 +89,9 @@ class HyperbolicAdam(HyperbolicOptimizer):
         grad = self.project_gradients(p)
         
         if group['weight_decay'] != 0:
-            grad = self.manifold.mobius_add(
+            grad = self.uhg.mobius_add(
                 grad,
-                self.manifold.mobius_scalar_mul(
+                self.uhg.mobius_scalar_mul(
                     group['weight_decay'],
                     p
                 )
@@ -100,15 +99,15 @@ class HyperbolicAdam(HyperbolicOptimizer):
             
         # Update momentum in hyperbolic space
         exp_avg = state['exp_avg']
-        exp_avg_new = self.manifold.mobius_add(
-            self.manifold.mobius_scalar_mul(beta1, exp_avg),
-            self.manifold.mobius_scalar_mul(1 - beta1, grad)
+        exp_avg_new = self.uhg.mobius_add(
+            self.uhg.mobius_scalar_mul(beta1, exp_avg),
+            self.uhg.mobius_scalar_mul(1 - beta1, grad)
         )
         state['exp_avg'] = exp_avg_new
         
         # Update velocity in hyperbolic space
         exp_avg_sq = state['exp_avg_sq']
-        grad_sq = self.manifold.inner(grad, grad)
+        grad_sq = self.uhg.inner(grad, grad)
         exp_avg_sq_new = beta2 * exp_avg_sq + (1 - beta2) * grad_sq
         state['exp_avg_sq'] = exp_avg_sq_new
         
@@ -128,16 +127,16 @@ class HyperbolicAdam(HyperbolicOptimizer):
         step_size = group['lr'] / bias_correction1
         
         # Apply update in hyperbolic space
-        p_new = self.manifold.mobius_add(
+        p_new = self.uhg.mobius_add(
             p,
-            self.manifold.mobius_scalar_mul(
+            self.uhg.mobius_scalar_mul(
                 -step_size,
                 exp_avg_new / denom
             )
         )
         
         # Ensure result satisfies hyperbolic constraints
-        return self.manifold.normalize(p_new)
+        return self.uhg.normalize(p_new)
         
     @torch.no_grad()
     def step(self, closure: Optional[Callable] = None) -> Optional[float]:

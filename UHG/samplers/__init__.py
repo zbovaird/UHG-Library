@@ -1,8 +1,7 @@
-from .hyperbolic import HyperbolicSampler, HyperbolicHMC
-from .langevin import HyperbolicLangevin
+from .base import ProjectiveSampler
+from .hyperbolic import ProjectiveHMC
 
 __all__ = [
-    'HyperbolicSampler',
-    'HyperbolicHMC',
-    'HyperbolicLangevin'
+    'ProjectiveSampler',
+    'ProjectiveHMC'
 ]

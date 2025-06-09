@@ -1,11 +1,11 @@
-from .euclidean import Euclidean
-from .base import Manifold
-from .lorentz import LorentzManifold
-from .siegel import SiegelManifold
+"""
+Universal Hyperbolic Geometry (UHG) Manifolds.
 
-__all__ = [
-    "Manifold",
-    "Euclidean",
-    "LorentzManifold",
-    "SiegelManifold",
-] 
+This module provides projective geometry implementations for UHG.
+"""
+
+from .base import Manifold, ScalingInfo
+from .hyperbolic import HyperbolicManifold
+from ..projective import ProjectiveUHG
+
+__all__ = ["Manifold", "ScalingInfo", "ProjectiveUHG", "HyperbolicManifold"] 

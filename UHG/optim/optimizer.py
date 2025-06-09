@@ -1,30 +1,28 @@
 import torch
 from torch.optim.optimizer import Optimizer
 from typing import Optional, Tuple, Union, Callable, List, Dict, Any
-from ..manifolds.base import Manifold
+from ..projective import ProjectiveUHG
 
-class HyperbolicOptimizer(Optimizer):
-    """Base class for optimizers operating in hyperbolic space.
+class ProjectiveOptimizer(Optimizer):
+    """Base class for optimizers using projective geometry.
     
-    All optimization steps are performed directly in hyperbolic space
-    using UHG principles, without tangent space mappings.
+    All optimization steps are performed using pure projective geometry,
+    following UHG principles without any manifold concepts.
     
     Args:
         params: Iterable of parameters to optimize
-        manifold: The hyperbolic manifold to operate on
         defaults: Default optimizer settings
     """
     def __init__(
         self,
         params: List[torch.Tensor],
-        manifold: Manifold,
         defaults: Dict[str, Any]
     ):
         super().__init__(params, defaults)
-        self.manifold = manifold
+        self.uhg = ProjectiveUHG()
         
     def project_gradients(self, p: torch.Tensor) -> torch.Tensor:
-        """Project gradients to preserve hyperbolic structure.
+        """Project gradients using projective geometry.
         
         Args:
             p: Parameter tensor
@@ -35,8 +33,9 @@ class HyperbolicOptimizer(Optimizer):
         if p.grad is None:
             return p.grad
             
-        # Project gradients directly in hyperbolic space
-        return self.manifold.project(p, p.grad)
+        # Project using projective transformation
+        matrix = self.uhg.get_projective_matrix(p.size(-1))
+        return self.uhg.transform(p.grad, matrix)
         
     def update_parameter(
         self,
@@ -44,7 +43,7 @@ class HyperbolicOptimizer(Optimizer):
         d_p: torch.Tensor,
         lr: float
     ) -> torch.Tensor:
-        """Update parameter while preserving hyperbolic structure.
+        """Update parameter using projective geometry.
         
         Args:
             p: Current parameter value
@@ -54,14 +53,12 @@ class HyperbolicOptimizer(Optimizer):
         Returns:
             Updated parameter value
         """
-        # Scale update in hyperbolic space
-        scaled_d_p = self.manifold.mobius_scalar_mul(-lr, d_p)
+        # Create projective transformation for update
+        matrix = torch.eye(p.size(-1) + 1, device=p.device)
+        matrix[:-1] -= lr * d_p
         
-        # Apply update directly in hyperbolic space
-        p_new = self.manifold.mobius_add(p, scaled_d_p)
-        
-        # Ensure result satisfies hyperbolic constraints
-        return self.manifold.normalize(p_new)
+        # Apply projective transformation
+        return self.uhg.transform(p, matrix)
         
     def preserve_cross_ratio(
         self,
@@ -69,7 +66,7 @@ class HyperbolicOptimizer(Optimizer):
         state: Dict[str, Any],
         p: torch.Tensor
     ) -> None:
-        """Adjust optimizer state to preserve cross-ratios.
+        """Preserve cross-ratios between optimization steps.
         
         Args:
             group: Optimizer parameter group
@@ -82,10 +79,16 @@ class HyperbolicOptimizer(Optimizer):
             state['prev_p'] = p.clone()
             return
             
-        # Compute and preserve cross-ratio between steps
+        # Compute cross-ratio between steps
         prev_p = state['prev_p']
-        cr = self.manifold.compute_cross_ratio(prev_p, p)
-        p_adj = self.manifold.preserve_cross_ratio(p, cr)
+        cr = self.uhg.cross_ratio(prev_p, p, prev_p, p)
+        
+        # Create projective transformation to preserve cross-ratio
+        matrix = self.uhg.get_projective_matrix(p.size(-1))
+        matrix = matrix * cr.view(-1, 1, 1)
+        
+        # Apply transformation
+        p_adj = self.uhg.transform(p, matrix)
         
         # Update state
         state['prev_p'] = p_adj.clone()
@@ -114,7 +117,7 @@ class HyperbolicOptimizer(Optimizer):
                 # Get state for current parameter
                 state = self.state[p]
                 
-                # Project gradients to hyperbolic space
+                # Project gradients using projective geometry
                 d_p = self.project_gradients(p)
                 
                 # Update parameter

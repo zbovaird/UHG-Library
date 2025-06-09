@@ -1,8 +1,44 @@
 include LICENSE
 include README.md
-include .cursorrules
+include CHANGELOG.md
+include CYBERSECURITY_BENEFITS.md
+include pyproject.toml
+include setup.cfg
 include requirements.txt
+
+# Documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+recursive-include docs *.py
+recursive-include docs *.yml
+
+# Package data
 recursive-include uhg *.py
-recursive-include tests *.py
+recursive-include uhg *.pyi
+recursive-include uhg py.typed
+
+# Examples
 recursive-include examples *.py
-recursive-include docs *.rst *.py *.ipynb 
+
+# Tests
+recursive-include tests *.py
+
+# Exclude
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude .git
+global-exclude .ipynb_checkpoints
+global-exclude .DS_Store
+global-exclude __pycache__
+global-exclude .coverage
+global-exclude *.sh
+global-exclude Miniconda3-latest-MacOSX-arm64.sh
+global-exclude UHG.pdf
+global-exclude UHG pictorial.pdf
+global-exclude *.log
+global-exclude .pytest_cache
+global-exclude .tox
+global-exclude .venv
+global-exclude build
+global-exclude dist
