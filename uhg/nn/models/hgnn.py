@@ -189,7 +189,8 @@ class HGCN(BaseHGNN):
         bias: bool = True,
         act: Optional[callable] = F.relu,
         use_attn: bool = False,
-        attn_heads: int = 1
+        attn_heads: int = 1,
+        edge_dim: Optional[int] = None
     ):
         super().__init__(
             manifold=manifold,
@@ -210,19 +211,20 @@ class HGCN(BaseHGNN):
         for _ in range(num_layers):
             self.message_passing_layers.append(
                 HyperbolicMessagePassing(
-                    manifold=manifold,
-                    in_channels=hidden_channels,
-                    out_channels=hidden_channels,
+                    in_features=hidden_channels,
+                    out_features=hidden_channels,
+                    edge_features=edge_dim,
                     aggr='mean'  # Use mean aggregation for stability
                 )
             )
         
         if use_attn:
             self.attention = HyperbolicAttention(
-                manifold=manifold,
-                in_channels=hidden_channels,
+                in_features=hidden_channels,
+                out_features=hidden_channels,
                 num_heads=attn_heads,
-                dropout=dropout
+                dropout=dropout,
+                concat=True
             )
     
     def _message_passing(
@@ -256,11 +258,19 @@ class HGCN(BaseHGNN):
             # Use standard message passing
             x = self.message_passing_layers[0](x, edge_index, edge_attr)
         
-        # Restore cross-ratio if possible
+        # Restore cross-ratio if possible (skip when would produce NaN/non-finite)
         if has_cr:
             cr_current = compute_cross_ratio(x[0], x[1], x[2], x[3])
-            if not torch.isnan(cr_current) and not torch.isnan(cr_initial) and cr_current != 0:
-                x = restore_cross_ratio(x, cr_initial)
+            eps = 1e-8
+            if (not torch.isnan(cr_current) and not torch.isnan(cr_initial)
+                and torch.abs(cr_current) > eps and torch.abs(cr_initial) > eps
+                and (cr_initial / cr_current) > eps):
+                try:
+                    x = restore_cross_ratio(x, cr_initial)
+                    if torch.isnan(x).any() or torch.isinf(x).any():
+                        pass  # keep x as-is
+                except (ValueError, RuntimeError):
+                    pass
         
         return x
     
@@ -309,11 +319,19 @@ class HGCN(BaseHGNN):
             if self.act is not None:
                 x = self.act(x)
             
-            # Restore cross-ratio if possible
+            # Restore cross-ratio if possible (skip when would produce NaN)
             if has_cr:
                 cr_current = compute_cross_ratio(x[0], x[1], x[2], x[3])
-                if not torch.isnan(cr_current) and not torch.isnan(cr_initial) and cr_current != 0:
-                    x = restore_cross_ratio(x, cr_initial)
+                eps = 1e-8
+                if (not torch.isnan(cr_current) and not torch.isnan(cr_initial)
+                    and torch.abs(cr_current) > eps and torch.abs(cr_initial) > eps
+                    and (cr_initial / cr_current) > eps):
+                    try:
+                        x_restored = restore_cross_ratio(x, cr_initial)
+                        if not (torch.isnan(x_restored).any() or torch.isinf(x_restored).any()):
+                            x = x_restored
+                    except (ValueError, RuntimeError):
+                        pass
         
         return x
 
@@ -373,31 +391,33 @@ class HGAT(BaseHGNN):
         self.num_heads = num_heads
         self.concat = concat
         
-        # Initialize attention layers
+        # Initialize attention layers (skip_final_proj=True: HGAT applies out_proj itself)
         self.attention_layers = nn.ModuleList()
         for _ in range(num_layers):
             self.attention_layers.append(
                 HyperbolicAttention(
-                    manifold=manifold,
-                    in_channels=hidden_channels,
+                    in_features=hidden_channels,
+                    out_features=hidden_channels,
                     num_heads=num_heads,
-                    dropout=dropout
+                    dropout=dropout,
+                    concat=concat,
+                    skip_final_proj=True
                 )
             )
         
-        # Initialize output projection
+        # Output projection: maps attention output to hidden_channels for next layer
         if concat:
             self.out_proj = HyperbolicLinear(
                 manifold=manifold,
                 in_features=hidden_channels * num_heads,
-                out_features=out_channels,
+                out_features=hidden_channels,
                 bias=bias
             )
         else:
             self.out_proj = HyperbolicLinear(
                 manifold=manifold,
                 in_features=hidden_channels,
-                out_features=out_channels,
+                out_features=hidden_channels,
                 bias=bias
             )
     
@@ -432,9 +452,19 @@ class HGAT(BaseHGNN):
         if self.concat:
             out = self.out_proj(out)
         
-        # Restore cross-ratio if possible
+        # Restore cross-ratio if possible (skip when would produce NaN)
         if has_cr:
-            out = restore_cross_ratio(out, cr_initial)
+            cr_current = compute_cross_ratio(out[0], out[1], out[2], out[3])
+            eps = 1e-8
+            if (not torch.isnan(cr_current) and not torch.isnan(cr_initial)
+                and torch.abs(cr_current) > eps and torch.abs(cr_initial) > eps
+                and (cr_initial / cr_current) > eps):
+                try:
+                    out = restore_cross_ratio(out, cr_initial)
+                    if torch.isnan(out).any() or torch.isinf(out).any():
+                        pass
+                except (ValueError, RuntimeError):
+                    pass
         
         return out
     

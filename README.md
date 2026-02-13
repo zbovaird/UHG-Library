@@ -1,17 +1,23 @@
-# UHG-Based Anomaly Detection
+# Universal Hyperbolic Geometry (UHG) Library
 
-This repository contains an implementation of anomaly detection using Universal Hyperbolic Geometry (UHG) principles. The code leverages the UHG library to perform geometric operations in hyperbolic space.
+A PyTorch library for hyperbolic deep learning using Universal Hyperbolic Geometry principles. All operations are performed directly in hyperbolic space without tangent space mappings.
 
 ## Overview
 
-Universal Hyperbolic Geometry (UHG) provides a powerful framework for representing complex hierarchical data. This implementation uses UHG principles to detect anomalies in network traffic data by embedding the data in hyperbolic space and identifying points that deviate from the normal patterns.
+Universal Hyperbolic Geometry provides a powerful framework for representing complex hierarchical data. This library includes:
+
+- **Core UHG operations**: Projective geometry, quadrance, spread, cross-ratio
+- **UHG-based graph neural networks**: ProjectiveGraphSAGE, HGCN, HGAT
+- **Unsupervised anomaly detection**: End-to-end pipeline with clustering and scoring
 
 ## Key Features
 
-- UHG-based graph neural network for anomaly detection
-- Efficient implementation of UHG operations using the UHG library
-- Support for large-scale datasets through batched processing
-- Visualization tools for analyzing embeddings and anomaly scores
+- Pure projective UHG operations (no tangent space or exp/log maps)
+- `UHGUnsupervisedAnomalyDetector`: fit, cluster, score, summarize, export in one API
+- Graph building with kNN and caching (`uhg.graph.build`)
+- DBSCAN clustering with grid search and quality metrics (`uhg.cluster`)
+- UHG quadrance-based anomaly scoring (`uhg.anomaly.scores`)
+- Programmatic reporting (JSON, entity aggregation; no visualization)
 
 ## Installation
 
@@ -21,92 +27,82 @@ git clone https://github.com/zbovaird/UHG-Library.git
 cd UHG-Library
 ```
 
-2. Install the required dependencies:
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
+For editable (development) install with full anomaly pipeline:
+```bash
+pip install -e ".[torch]"
+```
+
+## MCP Server (Development)
+
+The UHG MCP server provides tools that offload computation when developing. Enable it when you need to run tests, compute UHG quadrance/cross-ratio, run benchmarks, or run the anomaly pipeline smoke test.
+
+From the repository root:
+```bash
+python -m mcp_server.uhg_server
+```
+
+For Cursor integration, see [mcp_server/README.md](mcp_server/README.md).
+
 ## Usage
 
-### Basic Usage
+### Unsupervised Anomaly Detection (0.3.7+)
 
 ```python
-from uhg_anomaly_detection_refactored import load_and_preprocess_data, create_graph_data, UHGGraphNN, UHGAnomalyLoss
+from uhg import UHGUnsupervisedAnomalyDetector
+import numpy as np
 
-# Load and preprocess data
-features, labels, feature_info = load_and_preprocess_data("your_data.csv")
+X = np.random.randn(1000, 10) * 0.5  # Your feature matrix
 
-# Create graph data
-graph_data = create_graph_data(features, labels, k=5)
+detector = UHGUnsupervisedAnomalyDetector(hidden=64, embedding_dim=32)
+detector.fit(X, k=5, epochs=50, seed=42)
+detector.cluster(eps=0.5, min_samples=3)
 
-# Create model
-model = UHGGraphNN(
-    in_channels=features.shape[1],
-    hidden_channels=64,
-    embedding_dim=32,
-    num_layers=2,
-    dropout=0.2
-)
+scores = detector.score(method="centroid_quadrance")
+summary = detector.summarize(topk=20)
+print(summary["timings"], summary["top_entities"])
 
-# Create loss function
-criterion = UHGAnomalyLoss(spread_weight=0.1, quad_weight=1.0, margin=1.0)
-
-# Create optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
-
-# Train the model
-model.train()
-for epoch in range(100):
-    optimizer.zero_grad()
-    z = model(graph_data.x, graph_data.edge_index)
-    loss = criterion(z, graph_data.edge_index)
-    loss.backward()
-    optimizer.step()
-    print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
-
-# Generate embeddings
-model.eval()
-with torch.no_grad():
-    embeddings = model(graph_data.x, graph_data.edge_index).cpu().numpy()
+scores_new, labels = detector.predict(percentile=0.95)
+detector.export("model.pt")
 ```
 
-### Using UHG Utilities Directly
-
-The `uhg_utils.py` file provides a clean interface to the UHG library. You can use these utilities in your own code:
+### From DataFrame
 
 ```python
-from uhg_utils import uhg_quadrance, uhg_spread, uhg_cross_ratio, to_uhg_space
-
-# Convert points to UHG space
-points = to_uhg_space(your_data)
-
-# Compute quadrance (UHG distance) between points
-distance = uhg_quadrance(points[0], points[1])
-
-# Compute spread (UHG angle) between lines
-spread = uhg_spread(line1, line2)
-
-# Compute cross-ratio of four points
-cr = uhg_cross_ratio(p1, p2, p3, p4)
+import pandas as pd
+detector = UHGUnsupervisedAnomalyDetector()
+detector.fit_from_dataframe(df, epochs=30, seed=42)
 ```
 
-## File Structure
+### Graph, Clustering, and Scoring
 
-- `uhg_utils.py`: Utility functions that provide a clean interface to the UHG library
-- `uhg_anomaly_detection_refactored.py`: Main implementation of UHG-based anomaly detection
-- `requirements.txt`: List of required dependencies
+```python
+from uhg import build_knn_graph, run_dbscan, centroid_quadrance
 
-## UHG Library Integration
+edge_index = build_knn_graph(X, k=5)
+result = run_dbscan(embeddings, eps=0.5, min_samples=3)
+scores = centroid_quadrance(embeddings)
+```
 
-This implementation uses the UHG library for core geometric operations. The `uhg_utils.py` file serves as a bridge between the application code and the UHG library, providing a clean interface and handling edge cases.
+## Module Structure
 
-Key UHG operations used:
-- `quadrance`: Computes the squared distance between points in hyperbolic space
-- `spread`: Computes the squared angle between lines in hyperbolic space
-- `cross_ratio`: Computes the cross-ratio of four points, a projective invariant
-- `normalize_points`: Normalizes points according to UHG conventions
-- `join_points`: Computes the line joining two points
-- `meet_line_point`: Computes the intersection of a line and a point
+| Module | Description |
+|--------|-------------|
+| `uhg.graph.build` | `build_knn_graph`, `save_edge_index`, `load_edge_index`, `build_maxk_then_slice` |
+| `uhg.cluster` | `run_dbscan`, `eps_grid_search`, `auto_eps_kdist`, `davies_bouldin`, `silhouette`, `calinski_harabasz` |
+| `uhg.anomaly` | `UHGUnsupervisedAnomalyDetector`, `centroid_quadrance`, `neighbor_quadrance`, `composite_score` |
+| `uhg.utils.timing` | `time_block` context manager |
+| `uhg.utils.schema` | `detect_label_column`, `enforce_numeric`, `build_entity_index` |
+
+## Requirements
+
+- PyTorch, torch-geometric
+- scikit-learn, scipy, numpy, pandas
+- Optional: `mcp[cli]` for MCP server tools
 
 ## References
 

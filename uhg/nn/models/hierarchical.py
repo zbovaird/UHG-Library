@@ -180,18 +180,15 @@ class ProjectiveHierarchicalGNN(nn.Module):
                 if x.size(-1) != self.layers[-1].out_features + 1:
                     x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
                     
-        # Return normalized feature part using UHG
-        features = x[..., :-1]
-        features = self.uhg.normalize(features)
-        
+        # Layer returns [N, out_features]; treat as spatial (no homo)
+        features = x if x.size(-1) == self.layers[-1].out_features else x[..., :-1]
         # Ensure output has correct dimension
         if features.size(-1) != self.layers[-1].out_features:
             pad_size = self.layers[-1].out_features - features.size(-1)
             if pad_size > 0:
-                # Pad with zeros if needed
                 features = F.pad(features, (0, pad_size))
             else:
-                # Truncate if too large
                 features = features[..., :self.layers[-1].out_features]
-                
+        # L2 normalize for unit-norm output (uhg.normalize expects homogeneous form)
+        features = F.normalize(features, p=2, dim=-1)
         return features

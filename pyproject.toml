@@ -2,7 +2,6 @@
 requires = [
     "setuptools>=45",
     "wheel",
-    "setuptools_scm[toml]>=6.2",
     "torch>=1.7.0",
     "numpy>=1.19.0"
 ]
@@ -10,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.black]
 line-length = 88
-include = '\.pyi?$'
+include = '\\.pyi?$'
 exclude = '''
 /(
     \.eggs
@@ -50,10 +49,6 @@ ignore_missing_imports = true
 follow_imports = "silent"
 check_untyped_defs = true
 disallow_untyped_defs = true
-
-[tool.setuptools_scm]
-write_to = "uhg/_version.py"
-write_to_template = '__version__ = "{version}"'
 
 [tool.coverage.run]
 source = ["uhg"]

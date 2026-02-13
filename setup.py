@@ -4,7 +4,13 @@ import re
 
 # Read version from __init__.py
 def get_version():
-    init_py = os.path.join(os.path.dirname(__file__), 'uhg', '__init__.py')
+    base = os.path.dirname(__file__)
+    for pkg in ('uhg', 'UHG'):
+        init_py = os.path.join(base, pkg, '__init__.py')
+        if os.path.exists(init_py):
+            break
+    else:
+        raise RuntimeError("Cannot find uhg/__init__.py or UHG/__init__.py")
     with open(init_py, 'r') as f:
         content = f.read()
     version_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]*)['\"]", content, re.M)
@@ -12,26 +18,34 @@ def get_version():
         return version_match.group(1)
     raise RuntimeError("Unable to find version string.")
 
+_base = os.path.dirname(__file__)
+_pkgs = find_packages()
+# On Linux/git clone, package dir may be UHG; normalize to uhg for "import uhg"
+_use_uhg_map = any(p.startswith("UHG") for p in _pkgs)
 setup(
     name="uhg",
-    version="0.3.6",
-    packages=find_packages(),
+    version="0.3.7",
+    packages=[p.replace("UHG", "uhg", 1) for p in _pkgs],
+    package_dir={"uhg": "UHG"} if _use_uhg_map else {},
     install_requires=[
         "numpy>=1.19.0",
         "scipy>=1.6.0",
         "networkx>=2.5",
-        "pytest>=6.0.0",
+        "scikit-learn>=1.0.0",
+        "pandas>=1.1.0",
         "matplotlib>=3.3.0",
-        "tqdm>=4.50.0"
+        "tqdm>=4.50.0",
     ],
     extras_require={
-        "torch": ["torch>=1.8.0"],
+        "torch": ["torch>=1.8.0", "torch-geometric>=2.0.0"],
+        "mcp": ["mcp[cli]>=1.0.0"],
         "dev": [
+            "pytest>=6.0.0",
             "black",
             "flake8",
             "mypy",
-            "pytest-cov"
-        ]
+            "pytest-cov",
+        ],
     },
     author="UHG Library Team",
     author_email="info@uhglibrary.org",

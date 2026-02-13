@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - 2025-02-13
+### Added
+- Unsupervised anomaly detection pipeline: `UHGUnsupervisedAnomalyDetector`
+- Graph building: `uhg.graph.build` with `build_knn_graph`, `save_edge_index`, `load_edge_index`, `build_maxk_then_slice`
+- Clustering: `uhg.cluster.dbscan` (run_dbscan, eps_grid_search, auto_eps_kdist) and `uhg.cluster.metrics` (davies_bouldin, silhouette, calinski_harabasz)
+- Anomaly scoring: `uhg.anomaly.scores` (centroid_quadrance, neighbor_quadrance, boundary_score, composite_score)
+- Reporting: `uhg.anomaly.report` (rank_topk, aggregate_by_entity, summary_to_json, display_summary)
+- Utilities: `uhg.utils.timing` (time_block), `uhg.utils.schema` (detect_label_column, enforce_numeric, build_entity_index)
+- `uhg.nn.early_stopping.EarlyStopping` for training loops
+- `fit_from_dataframe`, `predict`, `score_new` for production workflows
+- Export/from_export with version compatibility check
+
 ## [0.3.4] - 2024-06-19
 ### Changed
 - Re-release of 0.3.3 with identical features and fixes, due to PyPI versioning requirements.

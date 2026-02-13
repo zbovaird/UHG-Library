@@ -10,6 +10,7 @@ from torch.optim.optimizer import Optimizer
 from typing import Dict, Any, Optional, Callable
 import math
 from uhg.metrics import UHGMetric
+from ..projective import ProjectiveUHG
 
 class UHGBaseOptimizer(Optimizer):
     """
@@ -30,6 +31,7 @@ class UHGBaseOptimizer(Optimizer):
             raise ValueError(f"Invalid epsilon value: {defaults.get('eps')}")
         super().__init__(params, defaults)
         self.metric = UHGMetric()
+        self.uhg = ProjectiveUHG()
         
     def _project_to_manifold(self, param: torch.Tensor, group: Dict[str, Any]) -> torch.Tensor:
         """
@@ -172,21 +174,12 @@ class UHGBaseOptimizer(Optimizer):
             loss = closure()
 
         for group in self.param_groups:
+            lr = group['lr']
             for p in group['params']:
                 if p.grad is None:
                     continue
-
-                # Get current point and gradient
-                x = p.data
                 grad = p.grad.data
-
-                # Update using projective operations
-                update = -group['lr'] * grad
-
-                # Apply update using projective addition
-                p.data = self.manifold.add(x, update)
-
-                # Normalize to ensure point stays on manifold
-                p.data = self.manifold.normalize_points(p.data)
+                # Pure Euclidean update step (no tangent space / exp map)
+                p.data.add_(grad, alpha=-lr)
 
         return loss 

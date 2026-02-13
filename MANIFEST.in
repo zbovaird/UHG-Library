@@ -1,29 +1,22 @@
 include LICENSE
 include README.md
 include CHANGELOG.md
-include CYBERSECURITY_BENEFITS.md
 include pyproject.toml
 include setup.cfg
 include requirements.txt
-
-# Documentation
-recursive-include docs *.md
-recursive-include docs *.rst
-recursive-include docs *.py
-recursive-include docs *.yml
 
 # Package data
 recursive-include uhg *.py
 recursive-include uhg *.pyi
 recursive-include uhg py.typed
 
-# Examples
-recursive-include examples *.py
+# Exclude non-library content from distributions
+prune examples
+prune tests
+prune benchmarks
+prune use_cases
 
-# Tests
-recursive-include tests *.py
-
-# Exclude
+# Global excludes
 global-exclude *.pyc
 global-exclude *.pyo
 global-exclude *.pyd

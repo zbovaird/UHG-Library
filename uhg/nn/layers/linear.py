@@ -59,21 +59,8 @@ class HyperbolicLinear(nn.Module):
         Returns:
             torch.Tensor: Output features of shape [N, out_features]
         """
-        # Store initial cross-ratio if possible
-        has_cr = x.size(0) > 3
-        if has_cr:
-            cr_initial = compute_cross_ratio(x[0], x[1], x[2], x[3])
-        
-        # Linear transformation
+        # Pure linear mapping on Euclidean feature part; callers handle projective lifting
         out = F.linear(x, self.weight, self.bias)
-        
-        # Project back to hyperbolic space
-        out = self.manifold.normalize_points(out)
-        
-        # Restore cross-ratio if possible
-        if has_cr:
-            out = restore_cross_ratio(out, cr_initial)
-        
         return out
     
     def extra_repr(self) -> str:

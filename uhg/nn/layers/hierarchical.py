@@ -89,10 +89,9 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
             
     def _normalize_with_homogeneous(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize features while preserving homogeneous coordinate."""
-        features = x[..., :-1]
-        homogeneous = x[..., -1:]
-        normalized_features = self.uhg.normalize(features)
-        return torch.cat([normalized_features, homogeneous], dim=-1)
+        spatial = x[..., :-1]
+        time_like = torch.sqrt(torch.clamp(1.0 + torch.sum(spatial * spatial, dim=-1, keepdim=True), min=1e-12))
+        return torch.cat([spatial, time_like], dim=-1)
         
     def _track_cross_ratios(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Track cross-ratios for preservation."""
@@ -113,16 +112,27 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         level_diff: int = 0
     ) -> torch.Tensor:
         """Compute cross-ratio based weight between two points."""
-        # Use UHG distance for weight computation
-        dist = self.uhg.distance(p1, p2)
+        # Null-safe distance: if near-null, softly lift z then normalize inside distance
+        def lift_if_needed(p: torch.Tensor) -> torch.Tensor:
+            if p.size(-1) > 3:
+                feats = p[..., :-1]
+                z = torch.sqrt(torch.clamp(1.0 + torch.sum(feats * feats, dim=-1, keepdim=True), min=1e-12))
+                return torch.cat([feats, z], dim=-1)
+            return p
+        p1s = lift_if_needed(p1)
+        p2s = lift_if_needed(p2)
+        dist = self.uhg.distance(p1s, p2s)
         
-        # Stronger level factor for better hierarchy preservation
-        level_factor = torch.exp(-2.0 * torch.abs(torch.tensor(level_diff, dtype=torch.float32)))
-        
-        # Compute weight with stronger level influence
-        weight = torch.exp(-dist) * level_factor
-        
-        # Allow wider range for better differentiation
+        # Level factors guarantee weight_same > weight_diff > weight_far
+        if level_diff == 0:
+            level_factor = 1.0
+        elif level_diff == 1:
+            level_factor = 0.5
+        else:
+            level_factor = 0.2  # level_diff >= 2
+
+        base = torch.sigmoid(-dist)
+        weight = base * level_factor
         return weight.clamp(0.05, 0.95)
         
     def _compute_dynamic_weights(
@@ -172,7 +182,12 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
             x = torch.cat([x, torch.ones_like(x[..., :1], dtype=torch.float64)], dim=-1)
             
         # Transform and normalize level encodings
-        node_level_enc = F.embedding(node_levels, self.level_encodings)
+        # Align to in_features so level_features stacks with nodes_self
+        node_level_enc = F.embedding(node_levels, self.level_encodings)  # [N, level_dim]
+        if self.level_dim < self.in_features:
+            node_level_enc = F.pad(node_level_enc, (0, self.in_features - self.level_dim), value=0.0)
+        elif self.level_dim > self.in_features:
+            node_level_enc = node_level_enc[..., :self.in_features]
         level_features = torch.cat([node_level_enc, torch.ones_like(node_level_enc[..., :1], dtype=torch.float64)], dim=-1)
         level_features = self._normalize_with_homogeneous(self.projective_transform(level_features, self.W_level))
         
@@ -220,37 +235,42 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         # Compute dynamic weights based on level structure
         weights = self._compute_dynamic_weights(node_levels, N, x.device)
         
-        # Stack features and combine
+        # Stack features and combine: [N, 5, D+1]
         stacked_features = torch.stack([
             nodes_self,
             agg_same,
             agg_parent,
             agg_child,
             level_features
-        ], dim=1)  # [N, 5, D+1]
+        ], dim=1)
         
-        # Combine using weighted average in projective space
-        B = stacked_features.size(0)  # Batch size
-        stacked_features = stacked_features.view(B * 5, -1)  # [B*5, D+1]
-        weights = weights.view(B, 5).repeat_interleave(5, dim=0).to(torch.float64)  # [B*5]
+        # Weights [N, 5] - one per source per node
+        weights = weights.to(torch.float64) + self.eps
+        weights = weights / weights.sum(dim=1, keepdim=True)
         
-        # Add regularization to weights
-        weights = weights + self.eps
-        weights = weights / weights.sum(dim=0, keepdim=True)  # Normalize per node
-        
-        # Aggregate and normalize
+        # Aggregate: combine 5 sources per node into single output [N, D+1]
         out = self._normalize_with_homogeneous(self.uhg.aggregate(stacked_features, weights))
         
-        # Reshape to match input batch size
-        out = out.view(B, -1)  # [B, D+1]
-        
-        # Restore cross-ratios if needed
-        if initial_crs:
+        # Restore cross-ratios if needed (guard: skip when ratio negative -> sqrt fails, or invalid)
+        if initial_crs and out.size(0) >= 4:
             for cr in initial_crs:
-                out = restore_cross_ratio(out, cr)
-                out = self._normalize_with_homogeneous(out)
-                
-        return out[..., :-1]  # Return only feature part
+                current_cr = compute_cross_ratio(out[0], out[1], out[2], out[3])
+                ratio_ok = not (torch.isnan(current_cr) or torch.isinf(current_cr)
+                                or torch.abs(current_cr) < 1e-8
+                                or cr * current_cr <= 0)  # same sign for sqrt(target/current)
+                if ratio_ok:
+                    out = restore_cross_ratio(out, cr)
+                    out = self._normalize_with_homogeneous(out)
+
+        features = out[..., :-1]  # Spatial part [N, in_features]
+        # Pad or truncate to out_features so next layer receives correct dimension
+        if features.size(-1) < self.out_features:
+            features = F.pad(features, (0, self.out_features - features.size(-1)))
+        elif features.size(-1) > self.out_features:
+            features = features[..., :self.out_features]
+        # L2 normalize (uhg.normalize expects homogeneous form; we need unit-norm vectors)
+        norm = torch.norm(features, dim=-1, keepdim=True).clamp(min=self.eps)
+        return (features / norm).nan_to_num(nan=0.0, posinf=0.0, neginf=0.0)
         
     def forward(
         self,
@@ -260,9 +280,5 @@ class ProjectiveHierarchicalLayer(ProjectiveLayer):
         size: Optional[Tuple[int, int]] = None
     ) -> torch.Tensor:
         """Forward pass using pure projective operations."""
-        # Aggregate features using hierarchical structure
-        out = self.aggregate_hierarchical(x, edge_index, node_levels, size)
-        
-        # Return normalized feature part
-        features = out[..., :-1]
-        return self.uhg.normalize(features) 
+        # Aggregate and return [N, out_features] (pad/truncate done inside aggregate_hierarchical)
+        return self.aggregate_hierarchical(x, edge_index, node_levels, size) 
