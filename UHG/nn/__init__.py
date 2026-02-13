@@ -5,23 +5,24 @@ from .layers import (
     UHGConv,
     UHGAttentionLayer,
     ProjectiveSAGEConv,
-    ProjectiveHierarchicalLayer
+    ProjectiveHierarchicalLayer,
+    HyperbolicLinear,
 )
 
-from .models import (
-    ProjectiveGraphSAGE,
-    ProjectiveHierarchicalGNN
-)
+from .models import ProjectiveGraphSAGE
 
 __all__ = [
-    # Layers
     'UHGLayer',
     'UHGConv',
     'UHGAttentionLayer',
     'ProjectiveSAGEConv',
     'ProjectiveHierarchicalLayer',
-    
-    # Models
+    'HyperbolicLinear',
     'ProjectiveGraphSAGE',
-    'ProjectiveHierarchicalGNN'
-] 
+]
+
+try:
+    from .models import ProjectiveHierarchicalGNN
+    __all__.append('ProjectiveHierarchicalGNN')
+except ImportError:
+    pass 
