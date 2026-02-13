@@ -38,8 +38,9 @@ try:
     from .cluster.metrics import davies_bouldin, silhouette, calinski_harabasz
     from .anomaly.scores import centroid_quadrance, neighbor_quadrance, composite_score
     _HAS_ANOMALY = True
-except ImportError:
+except ImportError as _e:
     _HAS_ANOMALY = False
+    _ANOMALY_IMPORT_ERROR = _e  # for diagnostics: print(uhg._ANOMALY_IMPORT_ERROR)
 
 __all__: List[str] = [
     "ProjectiveUHG",
