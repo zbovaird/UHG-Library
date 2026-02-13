@@ -98,7 +98,7 @@ class UHGUnsupervisedAnomalyDetector:
         criterion = UHGAnomalyLoss(spread_weight=0.1, quad_weight=1.0, margin=1.0)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01, weight_decay=1e-5)
         use_amp = device.type == "cuda"
-        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
         with time_block("train_s", timings):
             self.model.train()
