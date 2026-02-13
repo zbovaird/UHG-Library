@@ -330,14 +330,22 @@ class ProjectiveUHG:
         Normalize points to lie on the hyperbolic manifold (Minkowski norm = -1).
         Reference: UHG.pdf, Ch. 2, Section 2.2
 
+        For points that are already timelike (norm < 0), normalizes to unit
+        Minkowski norm.  For points that are spacelike (norm > 0) or near-null
+        (|norm| < eps), the time-like coordinate is recomputed from the spatial
+        components so that the Minkowski constraint is satisfied exactly:
+            z = sqrt(1 + x_1^2 + ... + x_{D-1}^2)
+
+        This recomputation strategy matches the standalone ``projective_normalize``
+        used in the proven v4.8.2 IDS pipeline and is numerically robust under
+        float32 mixed-precision training, where accumulated rounding error can
+        push points onto (or past) the null cone.
+
         Args:
-            x: Points to normalize [x:y:z]
+            x: Points to normalize [..., D]
 
         Returns:
             Normalized points with Minkowski norm = -1
-
-        Raises:
-            ValueError: if points are null or cannot be normalized to hyperboloid
         """
         # Ensure points are in homogeneous coordinates
         was_1d = False
@@ -348,28 +356,45 @@ class ProjectiveUHG:
         # Compute Minkowski norm
         norm = self.inner_product(x, x)
 
-        # Check for null points
-        if torch.any(torch.abs(norm) < self.eps):
-            raise ValueError("Cannot normalize null points (Minkowski norm = 0)")
+        # Identify points that need time-like recomputation:
+        # null (|norm| < eps) or spacelike (norm > 0).
+        needs_recompute = (torch.abs(norm) < self.eps) | (norm > 0)
 
-        # Check if points are hyperbolic (negative norm)
-        if torch.any(norm > 0):
-            # Recompute time-like coordinate to enforce norm -1
+        if torch.any(needs_recompute):
+            # Recompute time-like coordinate to enforce Minkowski norm = -1.
+            # This is always safe: z = sqrt(1 + ||spatial||^2) guarantees norm = -1.
             spatial = x[..., :-1]
-            time_like = torch.sqrt(torch.clamp(1.0 + torch.sum(spatial * spatial, dim=-1, keepdim=True), min=self.eps))
-            x = torch.cat([spatial, time_like], dim=-1)
-            return x.squeeze(0) if was_1d else x
+            time_like = torch.sqrt(
+                torch.clamp(
+                    1.0 + torch.sum(spatial * spatial, dim=-1, keepdim=True),
+                    min=self.eps,
+                )
+            )
+            x_fixed = torch.cat([spatial, time_like], dim=-1)
 
-        # Normalize to unit Minkowski norm
+            if torch.all(needs_recompute):
+                return x_fixed.squeeze(0) if was_1d else x_fixed
+
+            # Mix: only overwrite the rows that needed fixing
+            x = torch.where(needs_recompute.unsqueeze(-1), x_fixed, x)
+            norm = self.inner_product(x, x)
+
+        # All remaining points are timelike (norm < 0).  Normalize to unit
+        # Minkowski norm  (scale = sqrt(|norm|), x_norm = x / scale).
         scale = torch.sqrt(torch.abs(norm))
         x_norm = x / scale.unsqueeze(-1)
 
-        # Verify normalization (numerically stabilize by recomputing time-like if needed)
+        # Verify normalization; recompute time-like if residual error is large
         final_norm = self.inner_product(x_norm, x_norm)
         need_fix = ~torch.all(torch.abs(final_norm + 1.0) < self.eps)
         if need_fix:
             spatial = x_norm[..., :-1]
-            time_like = torch.sqrt(torch.clamp(1.0 + torch.sum(spatial * spatial, dim=-1, keepdim=True), min=self.eps))
+            time_like = torch.sqrt(
+                torch.clamp(
+                    1.0 + torch.sum(spatial * spatial, dim=-1, keepdim=True),
+                    min=self.eps,
+                )
+            )
             x_norm = torch.cat([spatial, time_like], dim=-1)
 
         return x_norm.squeeze(0) if was_1d else x_norm

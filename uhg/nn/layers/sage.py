@@ -267,7 +267,8 @@ class ProjectiveSAGEConv(UHGLayer):
             )
             
         # Construct output projective vector of size [N, out_features]
-        # Take first (out_features - 1) as spatial, compute time-like to get Minkowski norm -1
+        # Take first (out_features - 1) as spatial, compute time-like to get Minkowski norm -1.
+        # Use clamp for float32 safety (matches proven projective_normalize from v4.8.2 IDS).
         spatial_dim = self.out_features - 1
         spatial = out[..., :-1]
         if spatial.size(-1) >= spatial_dim:
@@ -275,6 +276,7 @@ class ProjectiveSAGEConv(UHGLayer):
         else:
             pad = spatial_dim - spatial.size(-1)
             spatial_sel = torch.cat([spatial, torch.zeros(spatial.size(0), pad, device=spatial.device, dtype=spatial.dtype)], dim=-1)
-        time_like = torch.sqrt(1.0 + torch.sum(spatial_sel * spatial_sel, dim=-1, keepdim=True))
+        spatial_norm_sq = torch.sum(spatial_sel * spatial_sel, dim=-1, keepdim=True)
+        time_like = torch.sqrt(torch.clamp(spatial_norm_sq + 1.0, min=1e-8))
         out_proj = torch.cat([spatial_sel, time_like], dim=-1)
         return self.uhg.normalize_points(out_proj) 
