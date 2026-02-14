@@ -67,3 +67,17 @@ def test_run_dbscan_accepts_tensor():
     X = torch.randn(20, 3)
     out = run_dbscan(X, eps=1.0, min_samples=2)
     assert out["labels"].shape == (20,)
+
+
+def test_run_dbscan_sanitizes_huge_and_nonfinite_values():
+    """run_dbscan handles overflow-scale finite values and Inf/NaN."""
+    rng = np.random.RandomState(0)
+    X = rng.randn(40, 4).astype(np.float64)
+    X[0, 0] = np.inf
+    X[1, 1] = np.nan
+    X[2, 2] = 1e200  # finite but far beyond float32-safe range
+    X[3, 3] = -1e200
+
+    out = run_dbscan(X, eps=1.0, min_samples=2)
+    assert out["labels"].shape == (40,)
+    assert out["core_mask"].shape == (40,)
