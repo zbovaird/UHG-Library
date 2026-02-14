@@ -341,45 +341,5 @@ def run_benchmark(
         return {"status": "error", "error": str(e)}
 
 
-@mcp.tool()
-def run_anomaly_smoke(
-    n_samples: int = 1000,
-    k: int = 2,
-    epochs: int = 5,
-) -> dict[str, Any]:
-    """Run UHGUnsupervisedAnomalyDetector end-to-end on synthetic data. Quick smoke test.
-
-    Args:
-        n_samples: Number of synthetic samples.
-        k: k for kNN graph.
-        epochs: Training epochs.
-
-    Returns:
-        Dict with status, summary_keys, total_s, and summary excerpt.
-    """
-    try:
-        import time
-        import numpy as np
-        from uhg.anomaly.unsupervised import UHGUnsupervisedAnomalyDetector
-
-        X = np.random.RandomState(42).randn(n_samples, 5) * 0.5
-        t0 = time.perf_counter()
-        det = UHGUnsupervisedAnomalyDetector(hidden=16, embedding_dim=8)
-        det.fit(X, k=k, epochs=epochs, seed=42)
-        det.cluster(eps=0.8, min_samples=2)
-        summary = det.summarize(topk=3)
-        elapsed = time.perf_counter() - t0
-        return {
-            "status": "ok",
-            "n_samples": n_samples,
-            "total_s": round(elapsed, 3),
-            "summary_keys": list(summary.keys()),
-            "n_nodes": summary.get("n_nodes"),
-            "top_entity_score": summary.get("top_entities", [{}])[0].get("score") if summary.get("top_entities") else None,
-        }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-
-
 if __name__ == "__main__":
     mcp.run(transport="stdio")

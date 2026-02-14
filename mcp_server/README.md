@@ -2,15 +2,6 @@
 
 Model Context Protocol (MCP) server for the UHG Library. Runs over stdio and exposes tools that offload computation, improve accuracy, and save time.
 
-## When to Use These Tools
-
-Enable the MCP server in Cursor when you are:
-
-- **Running or debugging UHG tests** — Use `run_tests` instead of manually invoking pytest.
-- **Computing UHG operations** — Asking the AI to compute quadrance, cross-ratio, or other projective invariants; the tools return exact results.
-- **Benchmarking** — Running ProjectiveGraphSAGE or similar benchmarks via `run_benchmark`.
-- **Verifying workspace state** — Checking UHG version and test file count with `workspace_status`.
-
 ## Tools
 
 | Tool | Description |
@@ -20,7 +11,6 @@ Enable the MCP server in Cursor when you are:
 | `uhg_cross_ratio` | Compute cross-ratio of four points (projective invariant). |
 | `workspace_status` | Get UHG version, workspace path, and test file count. |
 | `run_benchmark` | Run a quick ProjectiveGraphSAGE benchmark with synthetic data. |
-| `run_anomaly_smoke` | Run UHGUnsupervisedAnomalyDetector end-to-end on synthetic data (fit→cluster→summarize). |
 
 ## Installation
 
