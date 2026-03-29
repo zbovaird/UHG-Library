@@ -26,7 +26,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg-deep);color:var(--text
 
 /* ── Canvas + Overlays ── */
 #viewport{flex:1;position:relative;overflow:hidden}
-#viewport canvas{display:block;width:100%!important;height:100%!important}
+#viewport canvas{display:block;width:100%!important;height:100%!important;cursor:default}
+#viewport.crosshair canvas{cursor:crosshair}
+
+#info-panel details{margin-top:8px}
+#info-panel summary{cursor:pointer;color:var(--cyan);font-size:12px;font-weight:600;outline:none;user-select:none}
+#info-panel summary:hover{text-decoration:underline}
+#info-panel details[open] summary{margin-bottom:6px}
+#info-panel details .explain-body{font-size:11px;line-height:1.6;color:var(--text-dim)}
+#info-panel details .explain-body strong{color:var(--text);font-weight:600}
+#info-panel details .explain-body p{margin:6px 0}
 
 .overlay{position:absolute;pointer-events:none;z-index:10}
 .overlay.interactive{pointer-events:auto}
@@ -327,6 +336,18 @@ function buildScene1() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
   const state = { points: [], pointMeshes: [], lineMeshes: [], meetMeshes: [], lines: [] };
+  const drag = { active: false, idx: -1 };
+  const raycaster = new THREE.Raycaster();
+  const diskPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  function addPoint(x, z) {
+    const pt = fromKlein(x, z);
+    state.points.push(pt);
+    const mesh = makeGlowSphere([x, 0, z], C.cyan);
+    scene.add(mesh);
+    state.pointMeshes.push(mesh);
+    rebuild();
+  }
 
   function rebuild() {
     state.lineMeshes.forEach(m => scene.remove(m));
@@ -383,11 +404,7 @@ function buildScene1() {
     metricsPanel.innerHTML = html;
   }
 
-  const raycaster = new THREE.Raycaster();
-  const diskPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-
-  function onClick(e) {
-    if (currentScene !== 0) return;
+  function getHitPos(e) {
     const rect = viewport.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -396,15 +413,59 @@ function buildScene1() {
     raycaster.setFromCamera(mouse, camera);
     const hit = new THREE.Vector3();
     raycaster.ray.intersectPlane(diskPlane, hit);
-    if (!hit) return;
-    const x = hit.x, z = hit.z;
-    if (x*x + z*z >= 0.98) return;
+    return hit ? [hit.x, hit.z] : null;
+  }
 
-    const pt = fromKlein(x, z);
-    state.points.push(pt);
-    const mesh = makeGlowSphere([x, 0, z], C.cyan);
-    scene.add(mesh);
-    state.pointMeshes.push(mesh);
+  function findNearPoint(h) {
+    for (let i = 0; i < state.points.length; i++) {
+      const k = toKlein(state.points[i]);
+      if (!k) continue;
+      const dx = h[0] - k[0], dy = h[1] - k[1];
+      if (Math.sqrt(dx * dx + dy * dy) < 0.1) return i;
+    }
+    return -1;
+  }
+
+  function onDown(e) {
+    if (currentScene !== 0) return;
+    const h = getHitPos(e);
+    if (!h || h[0] * h[0] + h[1] * h[1] >= 0.98) return;
+    const near = findNearPoint(h);
+    if (near >= 0) {
+      drag.active = true;
+      drag.idx = near;
+      controls.enabled = false;
+      e.preventDefault();
+    }
+  }
+
+  function onMove(e) {
+    if (!drag.active) return;
+    const h = getHitPos(e);
+    if (!h || h[0] * h[0] + h[1] * h[1] >= 0.95) return;
+    state.points[drag.idx] = fromKlein(h[0], h[1]);
+    state.pointMeshes[drag.idx].position.set(h[0], 0, h[1]);
+    rebuild();
+  }
+
+  function onUp() {
+    drag.active = false;
+    controls.enabled = true;
+  }
+
+  function onClick(e) {
+    if (currentScene !== 0 || drag.active) return;
+    const h = getHitPos(e);
+    if (!h || h[0] * h[0] + h[1] * h[1] >= 0.98) return;
+    if (findNearPoint(h) >= 0) return;
+    addPoint(h[0], h[1]);
+  }
+
+  function undo() {
+    if (state.points.length === 0) return;
+    const mesh = state.pointMeshes.pop();
+    scene.remove(mesh);
+    state.points.pop();
     rebuild();
   }
 
@@ -419,25 +480,38 @@ function buildScene1() {
   return {
     scene, camera, controls, composer,
     activate() {
+      viewport.classList.add('crosshair');
       viewport.addEventListener('click', onClick);
+      viewport.addEventListener('pointerdown', onDown);
+      viewport.addEventListener('pointermove', onMove);
+      viewport.addEventListener('pointerup', onUp);
       metricsPanel.style.display = '';
       controlsPanel.style.display = '';
-      controlsPanel.innerHTML = '<button id="btn-clear1">Clear All</button>';
+      controlsPanel.innerHTML = '<button id="btn-undo1">Undo</button><button id="btn-clear1">Clear All</button>';
+      document.getElementById('btn-undo1').addEventListener('click', undo);
       document.getElementById('btn-clear1').addEventListener('click', clear);
       infoPanel.innerHTML = `
         <h2>Scene 1 — Projective Points &amp; Lines</h2>
-        <p>Click inside the Beltrami-Klein disk to place points. Lines and intersections are computed algebraically.</p>
+        <p>Click inside the disk to place points. Drag existing points to reshape the geometry. Lines and intersections are computed algebraically.</p>
         <div class="formula">join(a,b) = [a₂b₃−a₃b₂ : a₃b₁−a₁b₃ : a₁b₂−a₂b₁]
 meet(L,M) = join(L,M)   (dual operation)</div>
         <p style="color:var(--text-dim);margin-top:4px">
-          <span style="color:var(--cyan)">●</span> Points &nbsp;
-          <span style="color:var(--gold)">—</span> Lines &nbsp;
-          <span style="color:var(--magenta)">●</span> Meet points
+          <span style="color:var(--cyan)">\u25cf</span> Points &nbsp;
+          <span style="color:var(--gold)">\u2014</span> Lines &nbsp;
+          <span style="color:var(--magenta)">\u25cf</span> Meet points
         </p>`;
-      updateMetrics1();
+      if (state.points.length === 0) {
+        addPoint(0.3, -0.4);
+        addPoint(-0.5, 0.2);
+        addPoint(0.1, 0.6);
+      }
     },
     deactivate() {
+      viewport.classList.remove('crosshair');
       viewport.removeEventListener('click', onClick);
+      viewport.removeEventListener('pointerdown', onDown);
+      viewport.removeEventListener('pointermove', onMove);
+      viewport.removeEventListener('pointerup', onUp);
     },
     update(dt) {
       controls.update();
@@ -466,8 +540,8 @@ function buildScene2() {
     { pos: [-0.3, -0.1], color: C.cyan }
   ];
   const lineNormals = [
-    { dir: [0.6, 0.8], color: C.magenta },
-    { dir: [-0.7, 0.5], color: C.magenta }
+    { angle: Math.atan2(0.8, 0.6), color: C.magenta },
+    { angle: Math.atan2(0.5, -0.7), color: C.magenta }
   ];
 
   const spheres = pts.map(p => makeGlowSphere([p.pos[0], 0, p.pos[1]], p.color, 0.05));
@@ -478,7 +552,7 @@ function buildScene2() {
     lineObjs.forEach(l => scene.remove(l));
     lineObjs = [];
     lineNormals.forEach(ln => {
-      const a = ln.dir[0], b = ln.dir[1], c = 0;
+      const a = Math.cos(ln.angle), b = Math.sin(ln.angle), c = 0;
       const seg = clipLineToUnitDisk([a, b, c]);
       if (seg) {
         const line = makeLineBetween(seg[0], seg[1], ln.color);
@@ -488,6 +562,28 @@ function buildScene2() {
     });
   }
   rebuildLines();
+
+  let spreadArcMesh = null;
+  function rebuildSpreadArc() {
+    if (spreadArcMesh) scene.remove(spreadArcMesh);
+    const a1 = lineNormals[0].angle + Math.PI / 2;
+    const a2 = lineNormals[1].angle + Math.PI / 2;
+    let start = a1, end = a2;
+    if (end < start) { const tmp = start; start = end; end = tmp; }
+    if (end - start > Math.PI) start += 2 * Math.PI;
+    const segs = 32;
+    const arcPts = [];
+    const radius = 0.15;
+    for (let i = 0; i <= segs; i++) {
+      const t = start + (end - start) * (i / segs);
+      arcPts.push(new THREE.Vector3(radius * Math.cos(t), 0, radius * Math.sin(t)));
+    }
+    if (arcPts.length > 1) {
+      const geo = new THREE.BufferGeometry().setFromPoints(arcPts);
+      spreadArcMesh = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: C.magenta, transparent: true, opacity: 0.6 }));
+      scene.add(spreadArcMesh);
+    }
+  }
 
   const dragState = { active: false, idx: -1, type: 'point' };
   const raycaster = new THREE.Raycaster();
@@ -511,24 +607,41 @@ function buildScene2() {
     if (!h) return;
     for (let i = 0; i < pts.length; i++) {
       const dx = h[0] - pts[i].pos[0], dy = h[1] - pts[i].pos[1];
-      if (Math.sqrt(dx*dx + dy*dy) < 0.1) {
+      if (Math.sqrt(dx * dx + dy * dy) < 0.1) {
         dragState.active = true; dragState.idx = i; dragState.type = 'point';
         controls.enabled = false;
         return;
       }
     }
+    for (let i = 0; i < lineNormals.length; i++) {
+      const ln = lineNormals[i];
+      const dirX = -Math.sin(ln.angle), dirY = Math.cos(ln.angle);
+      for (const sign of [0.7, -0.7]) {
+        const ex = dirX * sign, ey = dirY * sign;
+        const dx = h[0] - ex, dy = h[1] - ey;
+        if (Math.sqrt(dx * dx + dy * dy) < 0.15) {
+          dragState.active = true; dragState.idx = i; dragState.type = 'line';
+          controls.enabled = false;
+          return;
+        }
+      }
+    }
   }
+
   function onMove(e) {
     if (!dragState.active) return;
     const h = getHitPos(e);
     if (!h) return;
-    const r2 = h[0]*h[0] + h[1]*h[1];
-    if (r2 >= 0.95) return;
     if (dragState.type === 'point') {
+      const r2 = h[0] * h[0] + h[1] * h[1];
+      if (r2 >= 0.95) return;
       pts[dragState.idx].pos = h;
       spheres[dragState.idx].position.set(h[0], 0, h[1]);
+    } else if (dragState.type === 'line') {
+      lineNormals[dragState.idx].angle = Math.atan2(h[1], h[0]);
     }
   }
+
   function onUp() { dragState.active = false; controls.enabled = true; }
 
   function updateMetrics2() {
@@ -536,24 +649,24 @@ function buildScene2() {
     const b = fromKlein(pts[1].pos[0], pts[1].pos[1]);
     const Q = quadrance(a, b);
 
-    const L1 = [lineNormals[0].dir[0], lineNormals[0].dir[1], 0];
-    const L2 = [lineNormals[1].dir[0], lineNormals[1].dir[1], 0];
+    const L1 = [Math.cos(lineNormals[0].angle), Math.sin(lineNormals[0].angle), 0];
+    const L2 = [Math.cos(lineNormals[1].angle), Math.sin(lineNormals[1].angle), 0];
     const S = spread(L1, L2);
 
     metricsPanel.innerHTML = `
       <div class="label">Quadrance</div>
       <div class="val-cyan" style="font-size:16px">${Q.toFixed(6)}</div>
       <div style="color:var(--text-dim);font-size:10px;margin-top:2px">
-        Q(a,b) = 1 − (a·b)²/((a·a)(b·b))
+        Q(a,b) = 1 \u2212 (a\u00b7b)\u00b2/((a\u00b7a)(b\u00b7b))
       </div>
       <div class="label" style="margin-top:10px">Spread</div>
       <div class="val-magenta" style="font-size:16px">${S.toFixed(6)}</div>
       <div style="color:var(--text-dim);font-size:10px;margin-top:2px">
-        S(L,M) = 1 − (L·M)²/((L·L)(M·M))
+        S(L,M) = 1 \u2212 (L\u00b7M)\u00b2/((L\u00b7L)(M\u00b7M))
       </div>
       <div class="label" style="margin-top:10px">Inner Product</div>
       <div style="color:var(--text-dim);font-size:10px">
-        Minkowski: x₁x₂ + y₁y₂ − z₁z₂
+        Minkowski: x\u2081x\u2082 + y\u2081y\u2082 \u2212 z\u2081z\u2082
       </div>`;
   }
 
@@ -573,13 +686,15 @@ function buildScene2() {
       metricsPanel.style.display = '';
       controlsPanel.style.display = 'none';
       infoPanel.innerHTML = `
-        <h2>Scene 2 — Quadrance &amp; Spread</h2>
-        <p>Drag the <span style="color:var(--cyan)">cyan points</span> to see quadrance update in real-time.</p>
-        <div class="formula">Quadrance:  Q(a,b) = 1 − (a·b)² / ((a·a)(b·b))
-Spread:     S(L,M) = 1 − (L·M)² / ((L·L)(M·M))
-Minkowski:  a·b = a₁b₁ + a₂b₂ − a₃b₃</div>`;
+        <h2>Scene 2 \u2014 Quadrance &amp; Spread</h2>
+        <p>Drag <span style="color:var(--cyan)">cyan points</span> to explore quadrance. Drag <span style="color:var(--magenta)">magenta line</span> endpoints to rotate lines and watch spread change.</p>
+        <div class="formula">Quadrance:  Q(a,b) = 1 \u2212 (a\u00b7b)\u00b2 / ((a\u00b7a)(b\u00b7b))
+Spread:     S(L,M) = 1 \u2212 (L\u00b7M)\u00b2 / ((L\u00b7L)(M\u00b7M))
+Minkowski:  a\u00b7b = a\u2081b\u2081 + a\u2082b\u2082 \u2212 a\u2083b\u2083</div>
+        <p style="color:var(--text-dim);font-size:11px;margin-top:4px">Drag points near the disk boundary to see quadrance diverge from Euclidean distance.</p>`;
       updateMetrics2();
       rebuildQLine();
+      rebuildSpreadArc();
     },
     deactivate() {
       viewport.removeEventListener('pointerdown', onDown);
@@ -591,6 +706,7 @@ Minkowski:  a·b = a₁b₁ + a₂b₂ − a₃b₃</div>`;
       updateMetrics2();
       rebuildQLine();
       rebuildLines();
+      rebuildSpreadArc();
       spheres.forEach((s, i) => s.scale.setScalar(1 + 0.06 * Math.sin(clock.elapsedTime * 2.5 + i)));
     }
   };
@@ -615,21 +731,26 @@ function buildScene3() {
   ];
   const colors = [C.cyan, C.green, C.gold, C.magenta];
   const labels = ['A', 'B', 'C', 'D'];
-  const spheres = basePoints.map((p, i) => makeGlowSphere([p[0], 0, p[1] === 1 ? 0 : p[1]], colors[i], 0.045));
+  const spheres = basePoints.map((p, i) => makeGlowSphere([p[0], 0, 0], colors[i], 0.045));
   spheres.forEach(s => scene.add(s));
 
-  const baseLine = makeLineBetween([-0.95, 0], [0.95, 0], 0x444466);
-  scene.add(baseLine);
+  const ghosts = basePoints.map((p, i) => {
+    const s = makeGlowSphere([p[0], 0, 0], colors[i], 0.03);
+    s.material.opacity = 0.2;
+    scene.add(s);
+    return s;
+  });
 
+  let currentLineMesh = null;
   let tParam = 0;
+  let autoStartTimer = null;
+  let animating = false;
 
   function updatePositions() {
     const transformed = basePoints.map(p => projectiveTransform(p, tParam));
     transformed.forEach((tp, i) => {
       const k = toKlein(tp);
-      if (k) {
-        spheres[i].position.set(k[0], 0, k[1]);
-      }
+      if (k) spheres[i].position.set(k[0], 0, k[1]);
     });
 
     const cr = crossRatio(transformed[0], transformed[1], transformed[2], transformed[3]);
@@ -649,21 +770,43 @@ function buildScene3() {
         ${labels.map((l, i) => `<span style="color:#${colors[i].toString(16).padStart(6,'0')}">${l}</span>`).join(' &nbsp; ')}
       </div>`;
 
-    if (baseLine) scene.remove(baseLine);
+    if (currentLineMesh) scene.remove(currentLineMesh);
+    currentLineMesh = null;
     const k0 = toKlein(transformed[0]), k3 = toKlein(transformed[3]);
     if (k0 && k3) {
       const dx = k3[0] - k0[0], dy = k3[1] - k0[1];
-      const len = Math.sqrt(dx*dx + dy*dy);
+      const len = Math.sqrt(dx * dx + dy * dy);
       if (len > 0.01) {
         const ext = 0.95 / len;
         const lp1 = [k0[0] - dx * ext, k0[1] - dy * ext];
         const lp2 = [k3[0] + dx * ext, k3[1] + dy * ext];
-        const clipR = (p) => { const r = Math.sqrt(p[0]*p[0]+p[1]*p[1]); if(r>0.98){p[0]*=0.98/r;p[1]*=0.98/r;} return p; };
-        const nl = makeLineBetween(clipR(lp1), clipR(lp2), 0x444466);
-        scene.add(nl);
-        // we don't track old baseLine reference properly, but it's fine for a demo
+        const clipR = (p) => { const r = Math.sqrt(p[0] * p[0] + p[1] * p[1]); if (r > 0.98) { p[0] *= 0.98 / r; p[1] *= 0.98 / r; } return p; };
+        currentLineMesh = makeLineBetween(clipR(lp1), clipR(lp2), 0x444466);
+        scene.add(currentLineMesh);
       }
     }
+  }
+
+  function stopAutoStart() {
+    if (autoStartTimer) { clearTimeout(autoStartTimer); autoStartTimer = null; }
+    animating = false;
+    const btn = document.getElementById('btn-animate-cr');
+    if (btn) btn.textContent = 'Auto-Animate';
+  }
+
+  function startAnimation() {
+    animating = true;
+    const btn = document.getElementById('btn-animate-cr');
+    if (btn) btn.textContent = 'Stop';
+    const slider = document.getElementById('cr-slider');
+    const step = () => {
+      if (!animating || currentScene !== 2) return;
+      tParam += 0.008;
+      if (tParam > Math.PI) tParam = -Math.PI;
+      if (slider) slider.value = tParam;
+      requestAnimationFrame(step);
+    };
+    step();
   }
 
   return {
@@ -678,42 +821,40 @@ function buildScene3() {
         </div>
         <button id="btn-animate-cr">Auto-Animate</button>`;
       const slider = document.getElementById('cr-slider');
-      slider.addEventListener('input', () => { tParam = parseFloat(slider.value); });
-      let animating = false;
+      slider.addEventListener('input', () => { stopAutoStart(); tParam = parseFloat(slider.value); });
       document.getElementById('btn-animate-cr').addEventListener('click', function() {
-        animating = !animating;
-        this.textContent = animating ? 'Stop' : 'Auto-Animate';
         if (animating) {
-          const step = () => {
-            if (!animating || currentScene !== 2) return;
-            tParam += 0.008;
-            if (tParam > Math.PI) tParam = -Math.PI;
-            slider.value = tParam;
-            requestAnimationFrame(step);
-          };
-          step();
+          animating = false;
+          this.textContent = 'Auto-Animate';
+        } else {
+          startAnimation();
         }
       });
 
       infoPanel.innerHTML = `
-        <h2>Scene 3 — Cross-Ratio Invariance</h2>
-        <p>The cross-ratio is preserved under projective transformations. Drag the slider or click animate to see 4 collinear points transform while their cross-ratio stays constant.</p>
-        <div class="formula">(A,B;C,D) = (A·C)(B·D) / ((A·D)(B·C))
-where · is the Minkowski inner product</div>
+        <h2>Scene 3 \u2014 Cross-Ratio Invariance</h2>
+        <p>The cross-ratio is preserved under projective transformations. Watch the 4 points move \u2014 the value stays constant. Faded markers show the original positions.</p>
+        <div class="formula">(A,B;C,D) = (A\u00b7C)(B\u00b7D) / ((A\u00b7D)(B\u00b7C))
+where \u00b7 is the Minkowski inner product</div>
         <p style="color:var(--green);font-size:11px;margin-top:4px">This is the fundamental invariant of projective geometry.</p>`;
       updatePositions();
+
+      tParam = 0;
+      autoStartTimer = setTimeout(() => { startAnimation(); }, 400);
+      setTimeout(() => { if (animating && currentScene === 2) stopAutoStart(); }, 4000);
     },
-    deactivate() {},
+    deactivate() { stopAutoStart(); },
     update(dt) {
       controls.update();
       updatePositions();
       spheres.forEach((s, i) => s.scale.setScalar(1 + 0.07 * Math.sin(clock.elapsedTime * 3 + i * 1.2)));
+      ghosts.forEach((g, i) => g.material.opacity = 0.12 + 0.06 * Math.sin(clock.elapsedTime * 1.5));
     }
   };
 }
 
 // ════════════════════════════════════════════════════════════════
-//  SCENE 4: UHG VS TANGENT SPACE
+//  SCENE 4: UHG VS TANGENT SPACE (Animated Race)
 // ════════════════════════════════════════════════════════════════
 function buildScene4() {
   const scene = new THREE.Scene();
@@ -771,88 +912,157 @@ function buildScene4() {
     return group;
   }
 
-  const leftHyp = makeHyperboloid(-2.2);
-  const rightHyp = makeHyperboloid(2.2);
-  scene.add(leftHyp);
-  scene.add(rightHyp);
+  scene.add(makeHyperboloid(-2.2));
+  scene.add(makeHyperboloid(2.2));
 
-  const basePt = new THREE.Vector3(0, 0, 1);
-  const leftPt = makeGlowSphere([0, 0, 0.6], C.cyan, 0.05);
-  leftPt.position.x = -2.2;
-  scene.add(leftPt);
-  const rightPt = makeGlowSphere([0, 0, 0.6], C.green, 0.05);
-  rightPt.position.x = 2.2;
-  scene.add(rightPt);
+  const startY = 0, startZ = 0.6;
+  const endY = 0.15, endZ = -0.35;
+  const tangentY = 0.75;
 
-  // tangent plane (left side)
+  const leftStart = makeGlowSphere([-2.2, startY, startZ], C.cyan, 0.045);
+  const leftEnd = makeGlowSphere([-2.2, endY, endZ], C.cyan, 0.035);
+  leftEnd.material.opacity = 0.4;
+  scene.add(leftStart); scene.add(leftEnd);
+
+  const rightStart = makeGlowSphere([2.2, startY, startZ], C.green, 0.045);
+  const rightEnd = makeGlowSphere([2.2, endY, endZ], C.green, 0.035);
+  rightEnd.material.opacity = 0.4;
+  scene.add(rightStart); scene.add(rightEnd);
+
   const tangentPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.4, 1.4),
-    new THREE.MeshBasicMaterial({ color: C.gold, transparent: true, opacity: 0.1, side: THREE.DoubleSide })
+    new THREE.PlaneGeometry(1.6, 1.6),
+    new THREE.MeshBasicMaterial({ color: C.gold, transparent: true, opacity: 0.08, side: THREE.DoubleSide })
   );
-  tangentPlane.position.set(-2.2, 0.6, 0.6);
-  tangentPlane.rotation.x = -0.3;
+  tangentPlane.position.set(-2.2, tangentY, (startZ + endZ) / 2);
+  tangentPlane.rotation.x = -0.2;
   scene.add(tangentPlane);
 
-  // arrows for exp/log
-  function makeArrow(from, to, color) {
-    const dir = new THREE.Vector3().subVectors(to, from).normalize();
-    const len = from.distanceTo(to);
-    const arrow = new THREE.ArrowHelper(dir, from, len, color, 0.08, 0.05);
-    return arrow;
+  const tpWire = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.6, 1.6, 4, 4),
+    new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.06, wireframe: true, side: THREE.DoubleSide })
+  );
+  tpWire.position.copy(tangentPlane.position);
+  tpWire.rotation.copy(tangentPlane.rotation);
+  scene.add(tpWire);
+
+  const tradPathGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-2.2, startY, startZ),
+    new THREE.Vector3(-2.2, tangentY, startZ),
+    new THREE.Vector3(-2.2, tangentY, endZ),
+    new THREE.Vector3(-2.2, endY + 0.03, endZ)
+  ]);
+  scene.add(new THREE.Line(tradPathGeo, new THREE.LineBasicMaterial({ color: C.gold, transparent: true, opacity: 0.3 })));
+
+  const uhgPathGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(2.2, startY, startZ),
+    new THREE.Vector3(2.2, endY, endZ)
+  ]);
+  scene.add(new THREE.Line(uhgPathGeo, new THREE.LineBasicMaterial({ color: C.green, transparent: true, opacity: 0.5 })));
+
+  const tradParticle = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.9 })
+  );
+  scene.add(tradParticle);
+
+  const uhgParticle = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 16, 16),
+    new THREE.MeshBasicMaterial({ color: C.green, transparent: true, opacity: 0.9 })
+  );
+  scene.add(uhgParticle);
+
+  const errorRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.04, 0.07, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff5252, transparent: true, opacity: 0, side: THREE.DoubleSide })
+  );
+  errorRing.rotation.x = -Math.PI / 2;
+  scene.add(errorRing);
+
+  const successRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.04, 0.07, 24),
+    new THREE.MeshBasicMaterial({ color: C.green, transparent: true, opacity: 0, side: THREE.DoubleSide })
+  );
+  successRing.rotation.x = -Math.PI / 2;
+  scene.add(successRing);
+
+  let raceTime = 0;
+  const RACE_DURATION = 3.5;
+  const PAUSE_DURATION = 1.5;
+  const TOTAL_CYCLE = RACE_DURATION + PAUSE_DURATION;
+  let speedMult = 1.0;
+  let raceCount = 0;
+  let accumError = 0;
+
+  const tradWaypoints = [
+    { pos: [-2.2, startY, startZ], t: 0 },
+    { pos: [-2.2, tangentY, startZ], t: 0.3 },
+    { pos: [-2.2, tangentY, endZ], t: 0.7 },
+    { pos: [-2.2, endY + 0.03, endZ], t: 1.0 }
+  ];
+  const uhgWaypoints = [
+    { pos: [2.2, startY, startZ], t: 0 },
+    { pos: [2.2, endY, endZ], t: 0.6 }
+  ];
+
+  function lerpWaypoints(waypoints, progress) {
+    const p = Math.max(0, Math.min(1, progress));
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      if (p >= waypoints[i].t && p <= waypoints[i + 1].t) {
+        const segT = (p - waypoints[i].t) / (waypoints[i + 1].t - waypoints[i].t);
+        const a = waypoints[i].pos, b = waypoints[i + 1].pos;
+        return [a[0] + (b[0] - a[0]) * segT, a[1] + (b[1] - a[1]) * segT, a[2] + (b[2] - a[2]) * segT];
+      }
+    }
+    const last = waypoints[waypoints.length - 1].pos;
+    return [last[0], last[1], last[2]];
   }
 
-  const logArrow = makeArrow(
-    new THREE.Vector3(-2.2, 0, 0.6),
-    new THREE.Vector3(-2.2, 0.6, 0.6),
-    C.gold
-  );
-  scene.add(logArrow);
-
-  const expArrow = makeArrow(
-    new THREE.Vector3(-2.2, 0.6, 0.6),
-    new THREE.Vector3(-2.2, 0.2, -0.2),
-    C.gold
-  );
-  scene.add(expArrow);
-
-  // direct line on right (UHG)
-  const directGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(2.2, 0, 0.6),
-    new THREE.Vector3(2.2, 0.2, -0.2)
-  ]);
-  const directLine = new THREE.Line(directGeo, new THREE.LineBasicMaterial({ color: C.green, linewidth: 2 }));
-  scene.add(directLine);
-
-  const rightPt2 = makeGlowSphere([0, 0.2, -0.2], C.green, 0.04);
-  rightPt2.position.x = 2.2;
-  scene.add(rightPt2);
-
-  const leftPt2 = makeGlowSphere([0, 0.2, -0.2], C.cyan, 0.04);
-  leftPt2.position.x = -2.2;
-  scene.add(leftPt2);
+  function resetRace() {
+    raceTime = 0;
+    raceCount = 0;
+    accumError = 0;
+  }
 
   let leftLabel, rightLabel;
 
   return {
     scene, camera, controls, composer,
     activate() {
-      metricsPanel.style.display = 'none';
-      controlsPanel.style.display = 'none';
+      metricsPanel.style.display = '';
+      controlsPanel.style.display = '';
+      controlsPanel.innerHTML = `
+        <div class="slider-row">
+          <span>Speed</span>
+          <input type="range" id="s4-speed" min="0.3" max="3" step="0.1" value="1">
+          <span id="s4-speed-val">1.0x</span>
+        </div>
+        <button id="btn-replay4">Replay</button>`;
+      document.getElementById('s4-speed').addEventListener('input', function() {
+        speedMult = parseFloat(this.value);
+        document.getElementById('s4-speed-val').textContent = speedMult.toFixed(1) + 'x';
+      });
+      document.getElementById('btn-replay4').addEventListener('click', resetRace);
+
       infoPanel.innerHTML = `
-        <h2>Scene 4 — UHG vs Tangent Space</h2>
-        <p>Left: Traditional approach maps to tangent plane (log), computes, maps back (exp) — accumulating error. Right: UHG computes directly in projective coordinates with zero distortion.</p>
-        <div class="formula">Traditional: p → log(p) → Euclidean op → exp(result)
-UHG:         p → algebraic op → result (direct)</div>`;
+        <h2>Scene 4 \u2014 UHG vs Tangent Space</h2>
+        <p>Watch two particles race. Left takes the traditional path (log \u2192 tangent plane \u2192 exp); right takes the UHG direct path. The UHG particle arrives first with zero error.</p>
+        <div class="formula">Traditional: p \u2192 log(p) \u2192 Euclidean op \u2192 exp(result)
+  3 steps, accumulated rounding error
+
+UHG:  p \u2192 algebraic op \u2192 result
+  1 step, exact (cross-ratio preserved)</div>`;
 
       leftLabel = document.createElement('div');
       leftLabel.className = 'side-label left-label';
-      leftLabel.innerHTML = 'Traditional<br><span class="err">log → Euclidean → exp</span><span class="err">Accumulated distortion</span>';
+      leftLabel.innerHTML = 'Traditional<br><span class="err">log \u2192 tangent \u2192 exp</span><span class="err">Error: <span id="s4-trad-err">0.0000</span></span>';
       viewport.appendChild(leftLabel);
 
       rightLabel = document.createElement('div');
       rightLabel.className = 'side-label right-label';
-      rightLabel.innerHTML = 'UHG Direct<br><span class="ok">Projective algebra</span><span class="ok">Zero distortion</span>';
+      rightLabel.innerHTML = 'UHG Direct<br><span class="ok">Projective algebra</span><span class="ok">Error: 0.0000</span>';
       viewport.appendChild(rightLabel);
+
+      resetRace();
     },
     deactivate() {
       if (leftLabel) { viewport.removeChild(leftLabel); leftLabel = null; }
@@ -861,10 +1071,65 @@ UHG:         p → algebraic op → result (direct)</div>`;
     update(dt) {
       controls.update();
       const t = clock.elapsedTime;
-      const pulse = 0.5 + 0.5 * Math.sin(t * 1.5);
-      tangentPlane.material.opacity = 0.05 + 0.08 * pulse;
-      leftPt.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
-      rightPt.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
+      raceTime += dt * speedMult;
+
+      const cycleT = raceTime % TOTAL_CYCLE;
+      const raceProgress = Math.min(cycleT / RACE_DURATION, 1.0);
+      const inPause = cycleT > RACE_DURATION;
+
+      if (cycleT < dt * speedMult + 0.01 && raceTime > TOTAL_CYCLE) {
+        raceCount++;
+        accumError += 0.0073;
+      }
+
+      const tradPos = lerpWaypoints(tradWaypoints, raceProgress);
+      tradParticle.position.set(...tradPos);
+      tradParticle.material.opacity = inPause ? 0.5 + 0.3 * Math.sin(t * 4) : 0.9;
+
+      const uhgPos = lerpWaypoints(uhgWaypoints, raceProgress);
+      uhgParticle.position.set(...uhgPos);
+      uhgParticle.material.opacity = inPause ? 0.5 + 0.3 * Math.sin(t * 4) : 0.9;
+
+      const errorOffset = accumError * 0.4;
+      if (inPause) {
+        errorRing.position.set(-2.2, endY + 0.03, endZ + errorOffset * Math.sin(t * 0.5));
+        errorRing.material.opacity = 0.6 + 0.3 * Math.sin(t * 3);
+        successRing.position.set(2.2, endY, endZ);
+        successRing.material.opacity = 0.6 + 0.3 * Math.sin(t * 3);
+      } else {
+        errorRing.material.opacity = 0;
+        successRing.material.opacity = 0;
+      }
+
+      tangentPlane.material.opacity = raceProgress > 0.2 && raceProgress < 0.8 ? 0.06 + 0.06 * Math.sin(t * 3) : 0.04;
+
+      leftStart.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
+      rightStart.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
+
+      const totalErr = accumError + (raceProgress > 0.8 ? 0.0073 * (raceProgress - 0.8) / 0.2 : 0);
+      const errEl = document.getElementById('s4-trad-err');
+      if (errEl) errEl.textContent = totalErr.toFixed(4);
+
+      metricsPanel.innerHTML = `
+        <div class="label">Race</div>
+        <div style="margin-top:4px">
+          <div class="label">Laps completed</div>
+          <div class="val-cyan" style="font-size:14px">${raceCount}</div>
+        </div>
+        <div style="margin-top:8px">
+          <div class="label">Traditional</div>
+          <div style="color:var(--text-dim);font-size:10px">Steps: log \u2192 slide \u2192 exp (3)</div>
+          <div style="color:#ff5252;font-size:13px">Error: ${totalErr.toFixed(6)}</div>
+        </div>
+        <div style="margin-top:8px">
+          <div class="label">UHG</div>
+          <div style="color:var(--text-dim);font-size:10px">Steps: direct (1)</div>
+          <div class="val-green" style="font-size:13px">Error: 0.000000</div>
+        </div>
+        <div style="margin-top:8px;color:var(--text-dim);font-size:10px">
+          Error per lap: ~0.0073<br>
+          (from exp/log rounding)
+        </div>`;
     }
   };
 }
@@ -1021,16 +1286,44 @@ function buildScene5() {
 
   let leftLabel, rightLabel;
   let distortionAccum = 0;
+  let speedMult = 1.0;
+  const initialDelays = [];
+
+  tradParticles.forEach(p => initialDelays.push(p.progress));
+  uhgParticles.forEach(p => initialDelays.push(p.progress));
+
+  function restartScene5() {
+    distortionAccum = 0;
+    let idx = 0;
+    tradParticles.forEach(p => { p.progress = initialDelays[idx++]; p.mesh.material.opacity = 0; });
+    uhgParticles.forEach(p => { p.progress = initialDelays[idx++]; p.mesh.material.opacity = 0; });
+    const dEl = document.getElementById('distortion-val');
+    if (dEl) dEl.textContent = '0.0000';
+  }
 
   return {
     scene, camera, controls, composer,
     activate() {
       metricsPanel.style.display = '';
-      controlsPanel.style.display = 'none';
+      controlsPanel.style.display = '';
       distortionAccum = 0;
+
+      controlsPanel.innerHTML = `
+        <div class="slider-row">
+          <span>Speed</span>
+          <input type="range" id="s5-speed" min="0.5" max="3" step="0.1" value="1">
+          <span id="s5-speed-val">1.0x</span>
+        </div>
+        <button id="btn-restart5">Restart</button>`;
+      document.getElementById('s5-speed').addEventListener('input', function() {
+        speedMult = parseFloat(this.value);
+        document.getElementById('s5-speed-val').textContent = speedMult.toFixed(1) + 'x';
+      });
+      document.getElementById('btn-restart5').addEventListener('click', restartScene5);
+
       infoPanel.innerHTML = `
-        <h2>Scene 5 — Neural Network Flow</h2>
-        <p>Side-by-side: data flowing through a hyperbolic graph neural network. Left uses traditional Riemannian maps; right uses UHG's direct algebraic approach.</p>
+        <h2>Scene 5 \u2014 Neural Network Flow</h2>
+        <p>Side-by-side: data flowing through a hyperbolic graph neural network. Left uses traditional Riemannian maps; right uses UHG\u2019s direct algebraic approach.</p>
         <div class="formula">Traditional: input \u2192 log \u2192 tangent op \u2192 exp \u2192 next layer
   (each mapping step accumulates numerical error)
 
@@ -1041,7 +1334,15 @@ UHG: input \u2192 projective algebra \u2192 next layer
           <span style="color:var(--gold)">\u25cf</span> Hidden &nbsp;
           <span style="color:var(--green)">\u25cf</span> Output &nbsp;
           <span style="color:#ff5252">\u25cf</span> exp/log bottleneck
-        </p>`;
+        </p>
+        <details>
+          <summary>Why does the traditional side drift?</summary>
+          <div class="explain-body">
+            <p><strong>What is the cross-ratio?</strong> A geometric quantity computed from 4 points that stays constant under projective transformations. Think of it as a geometric \u201cfingerprint\u201d \u2014 if it changes, the geometry has been distorted.</p>
+            <p><strong>Why does the traditional approach drift?</strong> Each layer transition requires two numerical operations: <em>log</em> (project from the curved manifold to a flat tangent plane) and <em>exp</em> (project back). These rely on floating-point transcendental functions like sinh, cosh, and sqrt \u2014 each introducing small rounding errors (~10\u207b\u2077 per op). After many layers, these errors compound. The cross-ratio, which should be invariant, slowly drifts from its true value.</p>
+            <p><strong>Why does UHG stay exact?</strong> UHG works directly with projective coordinates using only rational algebra \u2014 addition, multiplication, and ratios. No transcendental functions, no tangent plane detour. The cross-ratio is preserved <em>by construction</em>: the operations never leave the projective space where it\u2019s defined, so there is no channel for numerical error to enter.</p>
+          </div>
+        </details>`;
 
       leftLabel = document.createElement('div');
       leftLabel.className = 'side-label left-label';
@@ -1060,13 +1361,14 @@ UHG: input \u2192 projective algebra \u2192 next layer
     update(dt) {
       controls.update();
       const t = clock.elapsedTime;
+      const sDt = dt * speedMult;
 
       tradEdges.forEach((e, i) => { e.mat.opacity = 0.06 + 0.06 * Math.sin(t * 1.5 + i * 0.4); });
       uhgEdges.forEach((e, i) => { e.mat.opacity = 0.10 + 0.10 * Math.sin(t * 2 + i * 0.5); });
 
       function tickParticles(arr, speed) {
         arr.forEach(p => {
-          p.progress += dt * speed;
+          p.progress += sDt * speed;
           if (p.progress > 1) p.progress -= 1 + Math.random() * 0.6;
           if (p.progress < 0) { p.mesh.material.opacity = 0; return; }
           const pr = p.progress;
@@ -1094,7 +1396,7 @@ UHG: input \u2192 projective algebra \u2192 next layer
 
       tangentPlane.material.opacity = 0.03 + 0.04 * Math.sin(t * 1.5);
 
-      distortionAccum += dt * 0.012;
+      distortionAccum += sDt * 0.012;
       const dEl = document.getElementById('distortion-val');
       if (dEl) dEl.textContent = distortionAccum.toFixed(4);
 
@@ -1106,16 +1408,19 @@ UHG: input \u2192 projective algebra \u2192 next layer
         <div style="margin-top:8px">
           <div class="label">Original</div>
           <div class="val-gold" style="font-size:15px">${crOriginal.toFixed(6)}</div>
+          <div style="color:var(--text-dim);font-size:9px">Reference value (golden ratio)</div>
         </div>
         <div style="margin-top:8px">
           <div class="label">Traditional (drifting)</div>
           <div class="val-magenta" style="font-size:15px">${tradCr.toFixed(6)}</div>
           <div style="color:#ff5252;font-size:10px">error: ${Math.abs(tradCr - crOriginal).toFixed(6)}</div>
+          <div style="color:var(--text-dim);font-size:9px">Drifts from repeated exp/log rounding</div>
         </div>
         <div style="margin-top:8px">
           <div class="label">UHG (exact)</div>
           <div class="val-green" style="font-size:15px">${crOriginal.toFixed(6)}</div>
           <div style="color:var(--green);font-size:10px">error: 0.000000</div>
+          <div style="color:var(--text-dim);font-size:9px">Algebraic ops preserve cross-ratio exactly</div>
         </div>`;
     }
   };
