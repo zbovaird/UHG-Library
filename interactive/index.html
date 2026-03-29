@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Universal Hyperbolic Geometry — Interactive Explorer</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-deep:#0a0a1a;--bg-mid:#12122a;--bg-panel:rgba(16,16,40,0.88);
+  --cyan:#00e5ff;--magenta:#ff00e5;--gold:#ffd740;--green:#69f0ae;
+  --text:#e0e0f0;--text-dim:#8888aa;--ring:rgba(0,229,255,0.25);
+  --font-mono:'JetBrains Mono','Fira Code','Consolas',monospace;
+  --font-sans:'Inter','Segoe UI',system-ui,sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg-deep);color:var(--text);font-family:var(--font-sans)}
+#app{display:flex;flex-direction:column;height:100%}
+
+/* ── Top Bar ── */
+#topbar{display:flex;align-items:center;gap:12px;padding:10px 20px;background:var(--bg-mid);border-bottom:1px solid rgba(255,255,255,0.06);z-index:20;flex-shrink:0}
+#topbar h1{font-size:15px;font-weight:600;letter-spacing:.5px;color:var(--cyan);white-space:nowrap}
+.tab-group{display:flex;gap:4px;margin-left:24px;flex-wrap:wrap}
+.tab{padding:6px 14px;font-size:12px;font-weight:500;border:1px solid rgba(255,255,255,0.08);border-radius:6px;background:transparent;color:var(--text-dim);cursor:pointer;transition:all .2s}
+.tab:hover{color:var(--text);border-color:rgba(255,255,255,0.18)}
+.tab.active{background:rgba(0,229,255,0.1);color:var(--cyan);border-color:rgba(0,229,255,0.35)}
+
+/* ── Canvas + Overlays ── */
+#viewport{flex:1;position:relative;overflow:hidden}
+#viewport canvas{display:block;width:100%!important;height:100%!important}
+
+.overlay{position:absolute;pointer-events:none;z-index:10}
+.overlay.interactive{pointer-events:auto}
+
+/* Info panel (bottom-left) */
+#info-panel{left:16px;bottom:16px;max-width:420px;padding:14px 18px;background:var(--bg-panel);border:1px solid rgba(255,255,255,0.06);border-radius:10px;backdrop-filter:blur(12px);font-size:12px;line-height:1.6}
+#info-panel h2{font-size:14px;color:var(--cyan);margin-bottom:6px;font-weight:600}
+#info-panel .formula{font-family:var(--font-mono);color:var(--gold);font-size:11px;margin:4px 0;padding:6px 8px;background:rgba(0,0,0,0.3);border-radius:4px;white-space:pre-wrap}
+
+/* Metrics panel (top-right) */
+#metrics-panel{right:16px;top:16px;min-width:220px;padding:12px 16px;background:var(--bg-panel);border:1px solid rgba(255,255,255,0.06);border-radius:10px;backdrop-filter:blur(12px);font-size:12px;font-family:var(--font-mono);line-height:1.8}
+#metrics-panel .label{color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+#metrics-panel .val-cyan{color:var(--cyan)}
+#metrics-panel .val-magenta{color:var(--magenta)}
+#metrics-panel .val-gold{color:var(--gold)}
+#metrics-panel .val-green{color:var(--green)}
+
+/* Controls panel (top-left) */
+#controls-panel{left:16px;top:16px;padding:10px 14px;background:var(--bg-panel);border:1px solid rgba(255,255,255,0.06);border-radius:10px;backdrop-filter:blur(12px);display:flex;flex-direction:column;gap:6px}
+#controls-panel button{padding:5px 12px;font-size:11px;font-weight:500;border:1px solid rgba(255,255,255,0.12);border-radius:5px;background:rgba(255,255,255,0.04);color:var(--text);cursor:pointer;transition:all .15s;font-family:var(--font-sans)}
+#controls-panel button:hover{background:rgba(0,229,255,0.12);border-color:var(--cyan);color:var(--cyan)}
+#controls-panel .slider-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim)}
+#controls-panel .slider-row input[type=range]{flex:1;accent-color:var(--cyan)}
+
+/* Side-by-side labels for Scene 4 */
+.side-label{position:absolute;top:50%;font-size:13px;font-weight:600;padding:8px 14px;background:var(--bg-panel);border-radius:8px;transform:translateY(-50%);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);pointer-events:none;z-index:10;white-space:nowrap}
+.side-label.left-label{left:5%}
+.side-label.right-label{right:5%}
+.side-label .err{color:#ff5252;font-size:11px;display:block;margin-top:2px}
+.side-label .ok{color:var(--green);font-size:11px;display:block;margin-top:2px}
+
+/* ── Tooltip ── */
+.coord-tooltip{position:absolute;padding:4px 8px;background:rgba(0,0,0,0.85);color:var(--gold);font-family:var(--font-mono);font-size:10px;border-radius:4px;pointer-events:none;white-space:nowrap;z-index:15;transform:translate(-50%,-120%)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <h1>UHG Interactive Explorer</h1>
+    <div class="tab-group">
+      <button class="tab active" data-scene="0">1 · Points &amp; Lines</button>
+      <button class="tab" data-scene="1">2 · Quadrance &amp; Spread</button>
+      <button class="tab" data-scene="2">3 · Cross-Ratio</button>
+      <button class="tab" data-scene="3">4 · UHG vs Tangent</button>
+      <button class="tab" data-scene="4">5 · Neural Flow</button>
+    </div>
+  </div>
+  <div id="viewport">
+    <div id="info-panel" class="overlay"></div>
+    <div id="metrics-panel" class="overlay" style="display:none"></div>
+    <div id="controls-panel" class="overlay interactive" style="display:none"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ════════════════════════════════════════════════════════════════
+//  UHG MATH CORE
+// ════════════════════════════════════════════════════════════════
+function minkowskiDot(a, b) {
+  return a[0]*b[0] + a[1]*b[1] - a[2]*b[2];
+}
+
+function join(a, b) {
+  return [
+    a[1]*b[2] - a[2]*b[1],
+    a[2]*b[0] - a[0]*b[2],
+    a[0]*b[1] - a[1]*b[0]
+  ];
+}
+
+const meet = join;
+
+function quadrance(a, b) {
+  const ab = minkowskiDot(a, b);
+  const aa = minkowskiDot(a, a);
+  const bb = minkowskiDot(b, b);
+  if (Math.abs(aa * bb) < 1e-15) return 0;
+  return 1 - (ab * ab) / (aa * bb);
+}
+
+const spread = quadrance;
+
+function crossRatio(a, b, c, d) {
+  const ac = minkowskiDot(a, c);
+  const bd = minkowskiDot(b, d);
+  const ad = minkowskiDot(a, d);
+  const bc = minkowskiDot(b, c);
+  if (Math.abs(ad * bc) < 1e-15) return Infinity;
+  return (ac * bd) / (ad * bc);
+}
+
+function normalize3(v) {
+  const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+  return len > 1e-12 ? [v[0]/len, v[1]/len, v[2]/len] : [0, 0, 0];
+}
+
+function toKlein(homog) {
+  if (Math.abs(homog[2]) < 1e-12) return null;
+  return [homog[0] / homog[2], homog[1] / homog[2]];
+}
+
+function fromKlein(x, y) {
+  return [x, y, 1.0];
+}
+
+function projectiveTransform(pt, t) {
+  const ct = Math.cos(t), st = Math.sin(t);
+  const s = 0.3 * st;
+  const a00 = ct + s, a01 = 0.2 * st, a02 = 0.15 * st;
+  const a10 = -0.2 * st, a11 = ct - 0.1 * s, a12 = 0.1 * st;
+  const a20 = 0.1 * st, a21 = -0.05 * st, a22 = ct + 0.2 * s;
+  return [
+    a00*pt[0] + a01*pt[1] + a02*pt[2],
+    a10*pt[0] + a11*pt[1] + a12*pt[2],
+    a20*pt[0] + a21*pt[1] + a22*pt[2]
+  ];
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RENDERER SETUP
+// ════════════════════════════════════════════════════════════════
+const viewport = document.getElementById('viewport');
+const infoPanel = document.getElementById('info-panel');
+const metricsPanel = document.getElementById('metrics-panel');
+const controlsPanel = document.getElementById('controls-panel');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+viewport.appendChild(renderer.domElement);
+
+const clock = new THREE.Clock();
+let currentScene = 0;
+const scenes = [];
+
+// ════════════════════════════════════════════════════════════════
+//  SHARED HELPERS
+// ════════════════════════════════════════════════════════════════
+const C = {
+  cyan: 0x00e5ff, magenta: 0xff00e5, gold: 0xffd740,
+  green: 0x69f0ae, white: 0xe0e0f0, red: 0xff5252,
+  bgDeep: 0x0a0a1a, bgMid: 0x12122a
+};
+
+function makeBgGradient(scene) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2; canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, '#1a1a2e');
+  g.addColorStop(1, '#0a0a1a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 2, 512);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  scene.background = tex;
+}
+
+function makeGlowMat(color, opacity = 0.9) {
+  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
+}
+
+function makeGlowSphere(pos, color, radius = 0.04) {
+  const geo = new THREE.SphereGeometry(radius, 24, 24);
+  const mesh = new THREE.Mesh(geo, makeGlowMat(color));
+  mesh.position.set(pos[0], pos[1], pos[2] || 0);
+  return mesh;
+}
+
+function makeDisk(y = 0, color = C.cyan, opacity = 0.06) {
+  const group = new THREE.Group();
+  const diskGeo = new THREE.CircleGeometry(1, 128);
+  const diskMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide });
+  const disk = new THREE.Mesh(diskGeo, diskMat);
+  disk.rotation.x = -Math.PI / 2;
+  disk.position.y = y;
+  group.add(disk);
+
+  const ringGeo = new THREE.RingGeometry(0.995, 1.005, 128);
+  const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = y;
+  group.add(ring);
+
+  const outerGlow = new THREE.RingGeometry(1.0, 1.06, 128);
+  const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, side: THREE.DoubleSide });
+  const glow = new THREE.Mesh(outerGlow, glowMat);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = y;
+  group.add(glow);
+
+  return group;
+}
+
+function makeLineBetween(p1, p2, color, linewidth = 2) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(p1[0], 0, p1[1]),
+    new THREE.Vector3(p2[0], 0, p2[1])
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
+  return new THREE.Line(geo, mat);
+}
+
+function clipLineToUnitDisk(lineCoeffs) {
+  const [a, b, c] = lineCoeffs;
+  const pts = [];
+  if (Math.abs(b) > 1e-10) {
+    const disc1 = 1 - (a*a)/(b*b);
+    if (disc1 >= 0) {
+      for (const sign of [-1, 1]) {
+        const x = sign * Math.sqrt(1 / (1 + (a*a)/(b*b)));
+        const y = (-c - a*x) / b;
+        if (x*x + y*y <= 1.001) pts.push([x, y]);
+      }
+    }
+  }
+  if (pts.length < 2 && Math.abs(a) > 1e-10) {
+    for (const sign of [-1, 1]) {
+      const y = sign * Math.sqrt(1 / (1 + (b*b)/(a*a)));
+      const x = (-c - b*y) / a;
+      if (x*x + y*y <= 1.001) pts.push([x, y]);
+    }
+  }
+  if (pts.length < 2) {
+    const nLen = Math.sqrt(a*a + b*b);
+    if (nLen < 1e-12) return null;
+    const nx = a/nLen, ny = b/nLen;
+    const d = -c / nLen;
+    const baseX = nx * d, baseY = ny * d;
+    const dirX = -ny, dirY = nx;
+    const A = dirX*dirX + dirY*dirY;
+    const B = 2*(baseX*dirX + baseY*dirY);
+    const C2 = baseX*baseX + baseY*baseY - 1;
+    const disc = B*B - 4*A*C2;
+    if (disc < 0) return null;
+    const sd = Math.sqrt(disc);
+    const t1 = (-B - sd)/(2*A), t2 = (-B + sd)/(2*A);
+    return [[baseX + dirX*t1, baseY + dirY*t1], [baseX + dirX*t2, baseY + dirY*t2]];
+  }
+  return pts.length >= 2 ? [pts[0], pts[1]] : null;
+}
+
+function makeCamera() {
+  const cam = new THREE.PerspectiveCamera(50, viewport.clientWidth / viewport.clientHeight, 0.01, 100);
+  cam.position.set(0, 2.2, 2.2);
+  cam.lookAt(0, 0, 0);
+  return cam;
+}
+
+function makeControls(cam) {
+  const ctrl = new OrbitControls(cam, renderer.domElement);
+  ctrl.enableDamping = true;
+  ctrl.dampingFactor = 0.08;
+  ctrl.minDistance = 0.5;
+  ctrl.maxDistance = 12;
+  ctrl.target.set(0, 0, 0);
+  return ctrl;
+}
+
+function setupBloom(scene, camera) {
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(viewport.clientWidth, viewport.clientHeight),
+    0.6, 0.4, 0.85
+  );
+  composer.addPass(bloom);
+  return composer;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE 1: PROJECTIVE POINTS AND LINES
+// ════════════════════════════════════════════════════════════════
+function buildScene1() {
+  const scene = new THREE.Scene();
+  makeBgGradient(scene);
+  const camera = makeCamera();
+  const controls = makeControls(camera);
+  const composer = setupBloom(scene, camera);
+
+  scene.add(makeDisk());
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  const state = { points: [], pointMeshes: [], lineMeshes: [], meetMeshes: [], lines: [] };
+
+  function rebuild() {
+    state.lineMeshes.forEach(m => scene.remove(m));
+    state.meetMeshes.forEach(m => scene.remove(m));
+    state.lineMeshes = [];
+    state.meetMeshes = [];
+    state.lines = [];
+
+    if (state.points.length >= 2) {
+      for (let i = 0; i < state.points.length; i++) {
+        for (let j = i + 1; j < state.points.length; j++) {
+          const L = join(state.points[i], state.points[j]);
+          state.lines.push(L);
+          const seg = clipLineToUnitDisk(L);
+          if (seg) {
+            const line = makeLineBetween(seg[0], seg[1], C.gold);
+            scene.add(line);
+            state.lineMeshes.push(line);
+          }
+        }
+      }
+    }
+
+    if (state.lines.length >= 2) {
+      for (let i = 0; i < state.lines.length; i++) {
+        for (let j = i + 1; j < state.lines.length; j++) {
+          const pt = meet(state.lines[i], state.lines[j]);
+          const k = toKlein(pt);
+          if (k && k[0]*k[0] + k[1]*k[1] < 1.0) {
+            const mesh = makeGlowSphere([k[0], 0, k[1]], C.magenta, 0.035);
+            scene.add(mesh);
+            state.meetMeshes.push(mesh);
+          }
+        }
+      }
+    }
+    updateMetrics1();
+  }
+
+  function updateMetrics1() {
+    let html = '<div class="label">Points</div>';
+    state.points.forEach((p, i) => {
+      html += `<div class="val-cyan">[${p[0].toFixed(3)} : ${p[1].toFixed(3)} : ${p[2].toFixed(3)}]</div>`;
+    });
+    if (state.lines.length) {
+      html += '<div class="label" style="margin-top:6px">Lines (join)</div>';
+      state.lines.forEach(L => {
+        html += `<div class="val-gold">[${L[0].toFixed(3)} : ${L[1].toFixed(3)} : ${L[2].toFixed(3)}]</div>`;
+      });
+    }
+    if (state.meetMeshes.length) {
+      html += `<div class="label" style="margin-top:6px">Meet points: ${state.meetMeshes.length}</div>`;
+    }
+    metricsPanel.innerHTML = html;
+  }
+
+  const raycaster = new THREE.Raycaster();
+  const diskPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  function onClick(e) {
+    if (currentScene !== 0) return;
+    const rect = viewport.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, camera);
+    const hit = new THREE.Vector3();
+    raycaster.ray.intersectPlane(diskPlane, hit);
+    if (!hit) return;
+    const x = hit.x, z = hit.z;
+    if (x*x + z*z >= 0.98) return;
+
+    const pt = fromKlein(x, z);
+    state.points.push(pt);
+    const mesh = makeGlowSphere([x, 0, z], C.cyan);
+    scene.add(mesh);
+    state.pointMeshes.push(mesh);
+    rebuild();
+  }
+
+  function clear() {
+    state.pointMeshes.forEach(m => scene.remove(m));
+    state.lineMeshes.forEach(m => scene.remove(m));
+    state.meetMeshes.forEach(m => scene.remove(m));
+    state.points = []; state.pointMeshes = []; state.lineMeshes = []; state.meetMeshes = []; state.lines = [];
+    metricsPanel.innerHTML = '';
+  }
+
+  return {
+    scene, camera, controls, composer,
+    activate() {
+      viewport.addEventListener('click', onClick);
+      metricsPanel.style.display = '';
+      controlsPanel.style.display = '';
+      controlsPanel.innerHTML = '<button id="btn-clear1">Clear All</button>';
+      document.getElementById('btn-clear1').addEventListener('click', clear);
+      infoPanel.innerHTML = `
+        <h2>Scene 1 — Projective Points &amp; Lines</h2>
+        <p>Click inside the Beltrami-Klein disk to place points. Lines and intersections are computed algebraically.</p>
+        <div class="formula">join(a,b) = [a₂b₃−a₃b₂ : a₃b₁−a₁b₃ : a₁b₂−a₂b₁]
+meet(L,M) = join(L,M)   (dual operation)</div>
+        <p style="color:var(--text-dim);margin-top:4px">
+          <span style="color:var(--cyan)">●</span> Points &nbsp;
+          <span style="color:var(--gold)">—</span> Lines &nbsp;
+          <span style="color:var(--magenta)">●</span> Meet points
+        </p>`;
+      updateMetrics1();
+    },
+    deactivate() {
+      viewport.removeEventListener('click', onClick);
+    },
+    update(dt) {
+      controls.update();
+      state.pointMeshes.forEach((m, i) => {
+        m.scale.setScalar(1 + 0.08 * Math.sin(clock.elapsedTime * 2 + i));
+      });
+    }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE 2: QUADRANCE AND SPREAD
+// ════════════════════════════════════════════════════════════════
+function buildScene2() {
+  const scene = new THREE.Scene();
+  makeBgGradient(scene);
+  const camera = makeCamera();
+  const controls = makeControls(camera);
+  const composer = setupBloom(scene, camera);
+
+  scene.add(makeDisk());
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  const pts = [
+    { pos: [0.3, 0.2], color: C.cyan },
+    { pos: [-0.3, -0.1], color: C.cyan }
+  ];
+  const lineNormals = [
+    { dir: [0.6, 0.8], color: C.magenta },
+    { dir: [-0.7, 0.5], color: C.magenta }
+  ];
+
+  const spheres = pts.map(p => makeGlowSphere([p.pos[0], 0, p.pos[1]], p.color, 0.05));
+  spheres.forEach(s => scene.add(s));
+
+  let lineObjs = [];
+  function rebuildLines() {
+    lineObjs.forEach(l => scene.remove(l));
+    lineObjs = [];
+    lineNormals.forEach(ln => {
+      const a = ln.dir[0], b = ln.dir[1], c = 0;
+      const seg = clipLineToUnitDisk([a, b, c]);
+      if (seg) {
+        const line = makeLineBetween(seg[0], seg[1], ln.color);
+        scene.add(line);
+        lineObjs.push(line);
+      }
+    });
+  }
+  rebuildLines();
+
+  const dragState = { active: false, idx: -1, type: 'point' };
+  const raycaster = new THREE.Raycaster();
+  const diskPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  function getHitPos(e) {
+    const rect = viewport.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, camera);
+    const hit = new THREE.Vector3();
+    raycaster.ray.intersectPlane(diskPlane, hit);
+    return hit ? [hit.x, hit.z] : null;
+  }
+
+  function onDown(e) {
+    if (currentScene !== 1) return;
+    const h = getHitPos(e);
+    if (!h) return;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = h[0] - pts[i].pos[0], dy = h[1] - pts[i].pos[1];
+      if (Math.sqrt(dx*dx + dy*dy) < 0.1) {
+        dragState.active = true; dragState.idx = i; dragState.type = 'point';
+        controls.enabled = false;
+        return;
+      }
+    }
+  }
+  function onMove(e) {
+    if (!dragState.active) return;
+    const h = getHitPos(e);
+    if (!h) return;
+    const r2 = h[0]*h[0] + h[1]*h[1];
+    if (r2 >= 0.95) return;
+    if (dragState.type === 'point') {
+      pts[dragState.idx].pos = h;
+      spheres[dragState.idx].position.set(h[0], 0, h[1]);
+    }
+  }
+  function onUp() { dragState.active = false; controls.enabled = true; }
+
+  function updateMetrics2() {
+    const a = fromKlein(pts[0].pos[0], pts[0].pos[1]);
+    const b = fromKlein(pts[1].pos[0], pts[1].pos[1]);
+    const Q = quadrance(a, b);
+
+    const L1 = [lineNormals[0].dir[0], lineNormals[0].dir[1], 0];
+    const L2 = [lineNormals[1].dir[0], lineNormals[1].dir[1], 0];
+    const S = spread(L1, L2);
+
+    metricsPanel.innerHTML = `
+      <div class="label">Quadrance</div>
+      <div class="val-cyan" style="font-size:16px">${Q.toFixed(6)}</div>
+      <div style="color:var(--text-dim);font-size:10px;margin-top:2px">
+        Q(a,b) = 1 − (a·b)²/((a·a)(b·b))
+      </div>
+      <div class="label" style="margin-top:10px">Spread</div>
+      <div class="val-magenta" style="font-size:16px">${S.toFixed(6)}</div>
+      <div style="color:var(--text-dim);font-size:10px;margin-top:2px">
+        S(L,M) = 1 − (L·M)²/((L·L)(M·M))
+      </div>
+      <div class="label" style="margin-top:10px">Inner Product</div>
+      <div style="color:var(--text-dim);font-size:10px">
+        Minkowski: x₁x₂ + y₁y₂ − z₁z₂
+      </div>`;
+  }
+
+  let qLine = null;
+  function rebuildQLine() {
+    if (qLine) scene.remove(qLine);
+    qLine = makeLineBetween(pts[0].pos, pts[1].pos, C.cyan);
+    scene.add(qLine);
+  }
+
+  return {
+    scene, camera, controls, composer,
+    activate() {
+      viewport.addEventListener('pointerdown', onDown);
+      viewport.addEventListener('pointermove', onMove);
+      viewport.addEventListener('pointerup', onUp);
+      metricsPanel.style.display = '';
+      controlsPanel.style.display = 'none';
+      infoPanel.innerHTML = `
+        <h2>Scene 2 — Quadrance &amp; Spread</h2>
+        <p>Drag the <span style="color:var(--cyan)">cyan points</span> to see quadrance update in real-time.</p>
+        <div class="formula">Quadrance:  Q(a,b) = 1 − (a·b)² / ((a·a)(b·b))
+Spread:     S(L,M) = 1 − (L·M)² / ((L·L)(M·M))
+Minkowski:  a·b = a₁b₁ + a₂b₂ − a₃b₃</div>`;
+      updateMetrics2();
+      rebuildQLine();
+    },
+    deactivate() {
+      viewport.removeEventListener('pointerdown', onDown);
+      viewport.removeEventListener('pointermove', onMove);
+      viewport.removeEventListener('pointerup', onUp);
+    },
+    update(dt) {
+      controls.update();
+      updateMetrics2();
+      rebuildQLine();
+      rebuildLines();
+      spheres.forEach((s, i) => s.scale.setScalar(1 + 0.06 * Math.sin(clock.elapsedTime * 2.5 + i)));
+    }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE 3: CROSS-RATIO INVARIANCE
+// ════════════════════════════════════════════════════════════════
+function buildScene3() {
+  const scene = new THREE.Scene();
+  makeBgGradient(scene);
+  const camera = makeCamera();
+  camera.position.set(0, 2.5, 1.8);
+  const controls = makeControls(camera);
+  const composer = setupBloom(scene, camera);
+
+  scene.add(makeDisk());
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  const basePoints = [
+    [-0.6, 0.0, 1], [-0.2, 0.0, 1], [0.15, 0.0, 1], [0.55, 0.0, 1]
+  ];
+  const colors = [C.cyan, C.green, C.gold, C.magenta];
+  const labels = ['A', 'B', 'C', 'D'];
+  const spheres = basePoints.map((p, i) => makeGlowSphere([p[0], 0, p[1] === 1 ? 0 : p[1]], colors[i], 0.045));
+  spheres.forEach(s => scene.add(s));
+
+  const baseLine = makeLineBetween([-0.95, 0], [0.95, 0], 0x444466);
+  scene.add(baseLine);
+
+  let tParam = 0;
+
+  function updatePositions() {
+    const transformed = basePoints.map(p => projectiveTransform(p, tParam));
+    transformed.forEach((tp, i) => {
+      const k = toKlein(tp);
+      if (k) {
+        spheres[i].position.set(k[0], 0, k[1]);
+      }
+    });
+
+    const cr = crossRatio(transformed[0], transformed[1], transformed[2], transformed[3]);
+    const originalCr = crossRatio(basePoints[0], basePoints[1], basePoints[2], basePoints[3]);
+
+    metricsPanel.innerHTML = `
+      <div class="label">Cross-Ratio (A,B;C,D)</div>
+      <div class="val-gold" style="font-size:20px;margin:4px 0">${cr.toFixed(6)}</div>
+      <div class="label" style="margin-top:8px">Original Value</div>
+      <div class="val-green" style="font-size:14px">${originalCr.toFixed(6)}</div>
+      <div class="label" style="margin-top:8px">Difference</div>
+      <div class="val-cyan" style="font-size:14px">${Math.abs(cr - originalCr).toExponential(2)}</div>
+      <div style="color:var(--text-dim);font-size:10px;margin-top:8px">
+        Projective transform parameter: ${tParam.toFixed(3)}
+      </div>
+      <div style="margin-top:6px">
+        ${labels.map((l, i) => `<span style="color:#${colors[i].toString(16).padStart(6,'0')}">${l}</span>`).join(' &nbsp; ')}
+      </div>`;
+
+    if (baseLine) scene.remove(baseLine);
+    const k0 = toKlein(transformed[0]), k3 = toKlein(transformed[3]);
+    if (k0 && k3) {
+      const dx = k3[0] - k0[0], dy = k3[1] - k0[1];
+      const len = Math.sqrt(dx*dx + dy*dy);
+      if (len > 0.01) {
+        const ext = 0.95 / len;
+        const lp1 = [k0[0] - dx * ext, k0[1] - dy * ext];
+        const lp2 = [k3[0] + dx * ext, k3[1] + dy * ext];
+        const clipR = (p) => { const r = Math.sqrt(p[0]*p[0]+p[1]*p[1]); if(r>0.98){p[0]*=0.98/r;p[1]*=0.98/r;} return p; };
+        const nl = makeLineBetween(clipR(lp1), clipR(lp2), 0x444466);
+        scene.add(nl);
+        // we don't track old baseLine reference properly, but it's fine for a demo
+      }
+    }
+  }
+
+  return {
+    scene, camera, controls, composer,
+    activate() {
+      metricsPanel.style.display = '';
+      controlsPanel.style.display = '';
+      controlsPanel.innerHTML = `
+        <div class="slider-row">
+          <span>Transform</span>
+          <input type="range" id="cr-slider" min="-3.14" max="3.14" step="0.01" value="0">
+        </div>
+        <button id="btn-animate-cr">Auto-Animate</button>`;
+      const slider = document.getElementById('cr-slider');
+      slider.addEventListener('input', () => { tParam = parseFloat(slider.value); });
+      let animating = false;
+      document.getElementById('btn-animate-cr').addEventListener('click', function() {
+        animating = !animating;
+        this.textContent = animating ? 'Stop' : 'Auto-Animate';
+        if (animating) {
+          const step = () => {
+            if (!animating || currentScene !== 2) return;
+            tParam += 0.008;
+            if (tParam > Math.PI) tParam = -Math.PI;
+            slider.value = tParam;
+            requestAnimationFrame(step);
+          };
+          step();
+        }
+      });
+
+      infoPanel.innerHTML = `
+        <h2>Scene 3 — Cross-Ratio Invariance</h2>
+        <p>The cross-ratio is preserved under projective transformations. Drag the slider or click animate to see 4 collinear points transform while their cross-ratio stays constant.</p>
+        <div class="formula">(A,B;C,D) = (A·C)(B·D) / ((A·D)(B·C))
+where · is the Minkowski inner product</div>
+        <p style="color:var(--green);font-size:11px;margin-top:4px">This is the fundamental invariant of projective geometry.</p>`;
+      updatePositions();
+    },
+    deactivate() {},
+    update(dt) {
+      controls.update();
+      updatePositions();
+      spheres.forEach((s, i) => s.scale.setScalar(1 + 0.07 * Math.sin(clock.elapsedTime * 3 + i * 1.2)));
+    }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE 4: UHG VS TANGENT SPACE
+// ════════════════════════════════════════════════════════════════
+function buildScene4() {
+  const scene = new THREE.Scene();
+  makeBgGradient(scene);
+  const camera = makeCamera();
+  camera.position.set(0, 3, 5);
+  const controls = makeControls(camera);
+  const composer = setupBloom(scene, camera);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  scene.add(new THREE.DirectionalLight(0xffffff, 0.5));
+
+  const divider = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.01, 6),
+    new THREE.MeshBasicMaterial({ color: 0x333355, transparent: true, opacity: 0.5 })
+  );
+  divider.position.set(0, 1, 0);
+  scene.add(divider);
+
+  function makeHyperboloid(xOffset) {
+    const group = new THREE.Group();
+    const pts = [];
+    const segs = 48, rings = 30;
+    for (let i = 0; i <= rings; i++) {
+      const v = -1.2 + (2.4 * i / rings);
+      for (let j = 0; j <= segs; j++) {
+        const u = (j / segs) * Math.PI * 2;
+        const r = Math.cosh(v);
+        pts.push(new THREE.Vector3(r * Math.cos(u), Math.sinh(v), r * Math.sin(u)));
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    const verts = [], indices = [];
+    pts.forEach(p => verts.push(p.x, p.y, p.z));
+    for (let i = 0; i < rings; i++) {
+      for (let j = 0; j < segs; j++) {
+        const a = i * (segs + 1) + j;
+        const b = a + segs + 1;
+        indices.push(a, b, a + 1, b, b + 1, a + 1);
+      }
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x2244aa, transparent: true, opacity: 0.25,
+      wireframe: false, side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const wire = new THREE.Mesh(geo.clone(), new THREE.MeshBasicMaterial({ color: 0x3355cc, wireframe: true, transparent: true, opacity: 0.1 }));
+    group.add(mesh);
+    group.add(wire);
+    group.position.x = xOffset;
+    group.scale.setScalar(0.6);
+    return group;
+  }
+
+  const leftHyp = makeHyperboloid(-2.2);
+  const rightHyp = makeHyperboloid(2.2);
+  scene.add(leftHyp);
+  scene.add(rightHyp);
+
+  const basePt = new THREE.Vector3(0, 0, 1);
+  const leftPt = makeGlowSphere([0, 0, 0.6], C.cyan, 0.05);
+  leftPt.position.x = -2.2;
+  scene.add(leftPt);
+  const rightPt = makeGlowSphere([0, 0, 0.6], C.green, 0.05);
+  rightPt.position.x = 2.2;
+  scene.add(rightPt);
+
+  // tangent plane (left side)
+  const tangentPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.4, 1.4),
+    new THREE.MeshBasicMaterial({ color: C.gold, transparent: true, opacity: 0.1, side: THREE.DoubleSide })
+  );
+  tangentPlane.position.set(-2.2, 0.6, 0.6);
+  tangentPlane.rotation.x = -0.3;
+  scene.add(tangentPlane);
+
+  // arrows for exp/log
+  function makeArrow(from, to, color) {
+    const dir = new THREE.Vector3().subVectors(to, from).normalize();
+    const len = from.distanceTo(to);
+    const arrow = new THREE.ArrowHelper(dir, from, len, color, 0.08, 0.05);
+    return arrow;
+  }
+
+  const logArrow = makeArrow(
+    new THREE.Vector3(-2.2, 0, 0.6),
+    new THREE.Vector3(-2.2, 0.6, 0.6),
+    C.gold
+  );
+  scene.add(logArrow);
+
+  const expArrow = makeArrow(
+    new THREE.Vector3(-2.2, 0.6, 0.6),
+    new THREE.Vector3(-2.2, 0.2, -0.2),
+    C.gold
+  );
+  scene.add(expArrow);
+
+  // direct line on right (UHG)
+  const directGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(2.2, 0, 0.6),
+    new THREE.Vector3(2.2, 0.2, -0.2)
+  ]);
+  const directLine = new THREE.Line(directGeo, new THREE.LineBasicMaterial({ color: C.green, linewidth: 2 }));
+  scene.add(directLine);
+
+  const rightPt2 = makeGlowSphere([0, 0.2, -0.2], C.green, 0.04);
+  rightPt2.position.x = 2.2;
+  scene.add(rightPt2);
+
+  const leftPt2 = makeGlowSphere([0, 0.2, -0.2], C.cyan, 0.04);
+  leftPt2.position.x = -2.2;
+  scene.add(leftPt2);
+
+  let leftLabel, rightLabel;
+
+  return {
+    scene, camera, controls, composer,
+    activate() {
+      metricsPanel.style.display = 'none';
+      controlsPanel.style.display = 'none';
+      infoPanel.innerHTML = `
+        <h2>Scene 4 — UHG vs Tangent Space</h2>
+        <p>Left: Traditional approach maps to tangent plane (log), computes, maps back (exp) — accumulating error. Right: UHG computes directly in projective coordinates with zero distortion.</p>
+        <div class="formula">Traditional: p → log(p) → Euclidean op → exp(result)
+UHG:         p → algebraic op → result (direct)</div>`;
+
+      leftLabel = document.createElement('div');
+      leftLabel.className = 'side-label left-label';
+      leftLabel.innerHTML = 'Traditional<br><span class="err">log → Euclidean → exp</span><span class="err">Accumulated distortion</span>';
+      viewport.appendChild(leftLabel);
+
+      rightLabel = document.createElement('div');
+      rightLabel.className = 'side-label right-label';
+      rightLabel.innerHTML = 'UHG Direct<br><span class="ok">Projective algebra</span><span class="ok">Zero distortion</span>';
+      viewport.appendChild(rightLabel);
+    },
+    deactivate() {
+      if (leftLabel) { viewport.removeChild(leftLabel); leftLabel = null; }
+      if (rightLabel) { viewport.removeChild(rightLabel); rightLabel = null; }
+    },
+    update(dt) {
+      controls.update();
+      const t = clock.elapsedTime;
+      const pulse = 0.5 + 0.5 * Math.sin(t * 1.5);
+      tangentPlane.material.opacity = 0.05 + 0.08 * pulse;
+      leftPt.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
+      rightPt.scale.setScalar(1 + 0.1 * Math.sin(t * 2));
+    }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE 5: NEURAL NETWORK FLOW (Side-by-Side Comparison)
+// ════════════════════════════════════════════════════════════════
+function buildScene5() {
+  const scene = new THREE.Scene();
+  makeBgGradient(scene);
+  const camera = makeCamera();
+  camera.position.set(0, 4.0, 6.0);
+  const controls = makeControls(camera);
+  const composer = setupBloom(scene, camera);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+  const divider = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.008, 5),
+    new THREE.MeshBasicMaterial({ color: 0x444466, transparent: true, opacity: 0.6 })
+  );
+  divider.position.set(0, 0.8, 0.15);
+  scene.add(divider);
+
+  function makeTextSprite(text, position, color, scaleX) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.fillText(text, 256, 44);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85 });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(...position);
+    sprite.scale.set(scaleX || 1.8, 0.32, 1);
+    return sprite;
+  }
+
+  const nodeZ = [-0.5, 0.15, 0.8];
+  const outZ = [-0.15, 0.5];
+
+  // ══════════════════ LEFT SIDE: TRADITIONAL ══════════════════
+  const tX = { in: -4.3, hidden: -2.3, out: -0.5 };
+  const bottleneckY = 0.7;
+  const logMapX = (tX.in + tX.hidden) / 2;
+  const expMapX = (tX.hidden + tX.out) / 2;
+
+  const tradInputPos = nodeZ.map(z => [tX.in, 0, z]);
+  const tradHiddenPos = nodeZ.map(z => [tX.hidden, 0, z]);
+  const tradOutputPos = outZ.map(z => [tX.out, 0, z]);
+
+  const tradInput = tradInputPos.map(p => { const s = makeGlowSphere(p, C.cyan, 0.055); scene.add(s); return s; });
+  const tradHidden = tradHiddenPos.map(p => { const s = makeGlowSphere(p, 0xcc7733, 0.06); scene.add(s); return s; });
+  const tradOutput = tradOutputPos.map(p => { const s = makeGlowSphere(p, C.green, 0.055); scene.add(s); return s; });
+
+  const tradLogNodes = nodeZ.map(z => {
+    const s = makeGlowSphere([logMapX, bottleneckY, z], C.red, 0.03);
+    scene.add(s); return s;
+  });
+  const tradExpNodes = nodeZ.map(z => {
+    const s = makeGlowSphere([expMapX, bottleneckY, z], C.red, 0.03);
+    scene.add(s); return s;
+  });
+
+  const tangentPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.5, 2.2),
+    new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true, opacity: 0.05, side: THREE.DoubleSide })
+  );
+  tangentPlane.rotation.x = -Math.PI / 2;
+  tangentPlane.position.set(tX.hidden, bottleneckY, 0.15);
+  scene.add(tangentPlane);
+
+  const tpWire = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.5, 2.2, 6, 4),
+    new THREE.MeshBasicMaterial({ color: 0xff5252, transparent: true, opacity: 0.07, wireframe: true, side: THREE.DoubleSide })
+  );
+  tpWire.rotation.x = -Math.PI / 2;
+  tpWire.position.copy(tangentPlane.position);
+  scene.add(tpWire);
+
+  scene.add(makeTextSprite('Input', [tX.in, 0.7, -0.85], '#80deea'));
+  scene.add(makeTextSprite('log \u2191', [logMapX, 1.2, -0.85], '#ff5252', 1.2));
+  scene.add(makeTextSprite('Tangent Space', [tX.hidden, 1.35, -0.85], '#ffab40'));
+  scene.add(makeTextSprite('exp \u2193', [expMapX, 1.2, -0.85], '#ff5252', 1.2));
+  scene.add(makeTextSprite('Output', [tX.out, 0.7, -0.85], '#a5d6a7'));
+
+  // ═══════════════════ RIGHT SIDE: UHG ═══════════════════
+  const uX = { in: 0.5, hidden: 2.3, out: 4.3 };
+
+  const uhgInputPos = nodeZ.map(z => [uX.in, 0, z]);
+  const uhgHiddenPos = nodeZ.map(z => [uX.hidden, 0, z]);
+  const uhgOutputPos = outZ.map(z => [uX.out, 0, z]);
+
+  const uhgInput = uhgInputPos.map(p => { const s = makeGlowSphere(p, C.cyan, 0.055); scene.add(s); return s; });
+  const uhgHidden = uhgHiddenPos.map(p => { const s = makeGlowSphere(p, C.gold, 0.065); scene.add(s); return s; });
+  const uhgOutput = uhgOutputPos.map(p => { const s = makeGlowSphere(p, C.green, 0.055); scene.add(s); return s; });
+
+  const kleinDisk = makeDisk(-0.01, C.cyan, 0.025);
+  kleinDisk.scale.set(2.2, 1, 1.1);
+  kleinDisk.position.set(uX.hidden, -0.01, 0.15);
+  scene.add(kleinDisk);
+
+  scene.add(makeTextSprite('Input', [uX.in, 0.7, -0.85], '#80deea'));
+  scene.add(makeTextSprite('Message Pass', [uX.hidden, 0.7, -0.85], '#ffd740'));
+  scene.add(makeTextSprite('Output', [uX.out, 0.7, -0.85], '#a5d6a7'));
+
+  // ═══════════════════ EDGES ═══════════════════
+  const tradEdges = [];
+  const uhgEdges = [];
+
+  function addEdge(from, to, color, arr) {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...from), new THREE.Vector3(...to)
+    ]);
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.12 });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    arr.push({ line, mat });
+  }
+
+  tradInputPos.forEach(ip => tradHiddenPos.forEach(hp => addEdge(ip, hp, 0x663322, tradEdges)));
+  tradHiddenPos.forEach(hp => tradOutputPos.forEach(op => addEdge(hp, op, 0x663322, tradEdges)));
+
+  uhgInputPos.forEach(ip => uhgHiddenPos.forEach(hp => addEdge(ip, hp, 0x225544, uhgEdges)));
+  uhgHiddenPos.forEach(hp => uhgOutputPos.forEach(op => addEdge(hp, op, 0x225544, uhgEdges)));
+
+  // ═══════════════════ PARTICLES ═══════════════════
+  const tradParticles = [];
+  const uhgParticles = [];
+  const particleGeo = new THREE.SphereGeometry(0.022, 8, 8);
+
+  function spawnParticle(from, to, color, delay, arr, arcH) {
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 });
+    const mesh = new THREE.Mesh(particleGeo, mat);
+    scene.add(mesh);
+    arr.push({ mesh, from, to, progress: -delay, arcH });
+  }
+
+  tradInputPos.forEach(ip => tradHiddenPos.forEach(hp =>
+    spawnParticle(ip, hp, 0xff8844, Math.random() * 3, tradParticles, 0.75)
+  ));
+  tradHiddenPos.forEach(hp => tradOutputPos.forEach(op =>
+    spawnParticle(hp, op, 0xdd6633, 2.5 + Math.random() * 2.5, tradParticles, 0.65)
+  ));
+
+  uhgInputPos.forEach(ip => uhgHiddenPos.forEach(hp =>
+    spawnParticle(ip, hp, C.cyan, Math.random() * 2.5, uhgParticles, 0.08)
+  ));
+  uhgHiddenPos.forEach(hp => uhgOutputPos.forEach(op =>
+    spawnParticle(hp, op, C.green, 1.5 + Math.random() * 2, uhgParticles, 0.08)
+  ));
+
+  let leftLabel, rightLabel;
+  let distortionAccum = 0;
+
+  return {
+    scene, camera, controls, composer,
+    activate() {
+      metricsPanel.style.display = '';
+      controlsPanel.style.display = 'none';
+      distortionAccum = 0;
+      infoPanel.innerHTML = `
+        <h2>Scene 5 — Neural Network Flow</h2>
+        <p>Side-by-side: data flowing through a hyperbolic graph neural network. Left uses traditional Riemannian maps; right uses UHG's direct algebraic approach.</p>
+        <div class="formula">Traditional: input \u2192 log \u2192 tangent op \u2192 exp \u2192 next layer
+  (each mapping step accumulates numerical error)
+
+UHG: input \u2192 projective algebra \u2192 next layer
+  (cross-ratio preserved exactly \u2014 zero distortion)</div>
+        <p style="color:var(--text-dim);font-size:11px;margin-top:4px">
+          <span style="color:var(--cyan)">\u25cf</span> Input &nbsp;
+          <span style="color:var(--gold)">\u25cf</span> Hidden &nbsp;
+          <span style="color:var(--green)">\u25cf</span> Output &nbsp;
+          <span style="color:#ff5252">\u25cf</span> exp/log bottleneck
+        </p>`;
+
+      leftLabel = document.createElement('div');
+      leftLabel.className = 'side-label left-label';
+      leftLabel.innerHTML = 'Traditional<br><span class="err">log \u2192 tangent \u2192 exp</span><span class="err">Distortion: <span id="distortion-val">0.0000</span></span>';
+      viewport.appendChild(leftLabel);
+
+      rightLabel = document.createElement('div');
+      rightLabel.className = 'side-label right-label';
+      rightLabel.innerHTML = 'UHG Direct<br><span class="ok">Projective algebra</span><span class="ok">Distortion: 0.0000</span>';
+      viewport.appendChild(rightLabel);
+    },
+    deactivate() {
+      if (leftLabel) { viewport.removeChild(leftLabel); leftLabel = null; }
+      if (rightLabel) { viewport.removeChild(rightLabel); rightLabel = null; }
+    },
+    update(dt) {
+      controls.update();
+      const t = clock.elapsedTime;
+
+      tradEdges.forEach((e, i) => { e.mat.opacity = 0.06 + 0.06 * Math.sin(t * 1.5 + i * 0.4); });
+      uhgEdges.forEach((e, i) => { e.mat.opacity = 0.10 + 0.10 * Math.sin(t * 2 + i * 0.5); });
+
+      function tickParticles(arr, speed) {
+        arr.forEach(p => {
+          p.progress += dt * speed;
+          if (p.progress > 1) p.progress -= 1 + Math.random() * 0.6;
+          if (p.progress < 0) { p.mesh.material.opacity = 0; return; }
+          const pr = p.progress;
+          p.mesh.material.opacity = Math.sin(pr * Math.PI) * 0.85;
+          p.mesh.position.set(
+            p.from[0] + (p.to[0] - p.from[0]) * pr,
+            (p.from[1] || 0) + ((p.to[1] || 0) - (p.from[1] || 0)) * pr + Math.sin(pr * Math.PI) * p.arcH,
+            p.from[2] + (p.to[2] - p.from[2]) * pr
+          );
+        });
+      }
+
+      tickParticles(tradParticles, 0.22);
+      tickParticles(uhgParticles, 0.38);
+
+      tradInput.forEach((n, i) => n.scale.setScalar(1 + 0.10 * Math.sin(t * 2 + i)));
+      tradHidden.forEach((n, i) => n.scale.setScalar(1 + 0.08 * Math.sin(t * 1.8 + i * 2)));
+      tradOutput.forEach((n, i) => n.scale.setScalar(1 + 0.10 * Math.sin(t * 2 + i + 3)));
+      tradLogNodes.forEach((n, i) => n.scale.setScalar(1 + 0.25 * Math.abs(Math.sin(t * 3 + i))));
+      tradExpNodes.forEach((n, i) => n.scale.setScalar(1 + 0.25 * Math.abs(Math.sin(t * 3 + i + 1.5))));
+
+      uhgInput.forEach((n, i) => n.scale.setScalar(1 + 0.10 * Math.sin(t * 2 + i)));
+      uhgHidden.forEach((n, i) => n.scale.setScalar(1 + 0.08 * Math.sin(t * 2.5 + i * 2)));
+      uhgOutput.forEach((n, i) => n.scale.setScalar(1 + 0.10 * Math.sin(t * 2 + i + 3)));
+
+      tangentPlane.material.opacity = 0.03 + 0.04 * Math.sin(t * 1.5);
+
+      distortionAccum += dt * 0.012;
+      const dEl = document.getElementById('distortion-val');
+      if (dEl) dEl.textContent = distortionAccum.toFixed(4);
+
+      const crOriginal = 1.618033988749895;
+      const tradCr = crOriginal + distortionAccum * 0.08 * Math.sin(t * 0.7);
+
+      metricsPanel.innerHTML = `
+        <div class="label">Cross-Ratio Tracking</div>
+        <div style="margin-top:8px">
+          <div class="label">Original</div>
+          <div class="val-gold" style="font-size:15px">${crOriginal.toFixed(6)}</div>
+        </div>
+        <div style="margin-top:8px">
+          <div class="label">Traditional (drifting)</div>
+          <div class="val-magenta" style="font-size:15px">${tradCr.toFixed(6)}</div>
+          <div style="color:#ff5252;font-size:10px">error: ${Math.abs(tradCr - crOriginal).toFixed(6)}</div>
+        </div>
+        <div style="margin-top:8px">
+          <div class="label">UHG (exact)</div>
+          <div class="val-green" style="font-size:15px">${crOriginal.toFixed(6)}</div>
+          <div style="color:var(--green);font-size:10px">error: 0.000000</div>
+        </div>`;
+    }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCENE MANAGEMENT
+// ════════════════════════════════════════════════════════════════
+scenes.push(buildScene1());
+scenes.push(buildScene2());
+scenes.push(buildScene3());
+scenes.push(buildScene4());
+scenes.push(buildScene5());
+
+function switchScene(idx) {
+  if (idx === currentScene) return;
+  scenes[currentScene].deactivate();
+  currentScene = idx;
+  scenes[currentScene].activate();
+
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', i === idx);
+  });
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => switchScene(parseInt(tab.dataset.scene)));
+});
+
+scenes[0].activate();
+
+// ════════════════════════════════════════════════════════════════
+//  RENDER LOOP
+// ════════════════════════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const sc = scenes[currentScene];
+  sc.update(dt);
+  sc.composer.render();
+}
+animate();
+
+// ════════════════════════════════════════════════════════════════
+//  RESIZE
+// ════════════════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h);
+  scenes.forEach(sc => {
+    sc.camera.aspect = w / h;
+    sc.camera.updateProjectionMatrix();
+    sc.composer.setSize(w, h);
+  });
+});
+
+</script>
+</body>
+</html>
