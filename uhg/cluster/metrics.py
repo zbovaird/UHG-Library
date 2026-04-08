@@ -17,7 +17,9 @@ def _to_numpy(X: Union[torch.Tensor, np.ndarray]) -> np.ndarray:
     return np.asarray(X)
 
 
-def davies_bouldin(emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]) -> float:
+def davies_bouldin(
+    emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]
+) -> float:
     """Davies-Bouldin index (lower is better).
 
     Wraps sklearn.metrics.davies_bouldin_score.
@@ -35,7 +37,9 @@ def davies_bouldin(emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarra
     return float(davies_bouldin_score(X, y))
 
 
-def silhouette(emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]) -> float:
+def silhouette(
+    emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]
+) -> float:
     """Silhouette score (higher is better, range [-1, 1]).
 
     Wraps sklearn.metrics.silhouette_score.
@@ -53,7 +57,9 @@ def silhouette(emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, t
     return float(silhouette_score(X, y))
 
 
-def calinski_harabasz(emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]) -> float:
+def calinski_harabasz(
+    emb: Union[np.ndarray, torch.Tensor], labels: Union[np.ndarray, torch.Tensor]
+) -> float:
     """Calinski-Harabasz index (higher is better).
 
     Wraps sklearn.metrics.calinski_harabasz_score.

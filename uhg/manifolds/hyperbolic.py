@@ -17,7 +17,9 @@ class HyperbolicManifold:  # projective-only wrapper
 
     def __init__(self, curvature: float = -1.0, eps: float = 1e-8):
         if curvature >= 0:
-            raise ValueError("HyperbolicManifold requires negative curvature in UHG (projective model)")
+            raise ValueError(
+                "HyperbolicManifold requires negative curvature in UHG (projective model)"
+            )
         self.curvature = curvature
         self.eps = eps
         self._uhg = ProjectiveUHG(epsilon=eps)
@@ -36,7 +38,9 @@ class HyperbolicManifold:  # projective-only wrapper
     def inner_product(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         return self._uhg.inner_product(a, b)
 
-    def cross_ratio(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor) -> torch.Tensor:
+    def cross_ratio(
+        self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor
+    ) -> torch.Tensor:
         return self._uhg.cross_ratio(a, b, c, d)
 
     def join(self, p1: torch.Tensor, p2: torch.Tensor) -> torch.Tensor:
@@ -65,15 +69,21 @@ class HyperbolicManifold:  # projective-only wrapper
         if update.size(-1) == x_features.size(-1):
             new_features = x_features + update
             # Recompute time-like coordinate to stay on hyperboloid: z = sqrt(1 + ||features||^2)
-            new_time = torch.sqrt(1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True))
+            new_time = torch.sqrt(
+                1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True)
+            )
             return torch.cat([new_features, new_time], dim=-1)
         # Case 2: update matches full homogeneous vector
         elif update.size(-1) == x.size(-1):
             new = x + update
             new_features = new[..., :-1]
-            new_time = torch.sqrt(1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True))
+            new_time = torch.sqrt(
+                1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True)
+            )
             return torch.cat([new_features, new_time], dim=-1)
         # Fallback: broadcast if possible, then recompute time
         new_features = x_features + update
-        new_time = torch.sqrt(1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True))
-        return torch.cat([new_features, new_time], dim=-1) 
+        new_time = torch.sqrt(
+            1.0 + torch.sum(new_features * new_features, dim=-1, keepdim=True)
+        )
+        return torch.cat([new_features, new_time], dim=-1)

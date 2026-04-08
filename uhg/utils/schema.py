@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 try:
     import pandas as pd
+
     HAS_PANDAS = True
 except ImportError:
     HAS_PANDAS = False
@@ -16,14 +17,36 @@ except ImportError:
 
 
 # Common column name variants for label and entity detection
-LABEL_VARIANTS = frozenset({
-    "label", "labels", "Label", "Labels", "target", "Target",
-    "y", "class", "Class", "outcome", "Outcome"
-})
-ENTITY_VARIANTS = frozenset({
-    "entity", "Entity", "entity_id", "entity_id", "id", "ID",
-    "entityid", "entityId", "entity_id", "customer_id", "user_id"
-})
+LABEL_VARIANTS = frozenset(
+    {
+        "label",
+        "labels",
+        "Label",
+        "Labels",
+        "target",
+        "Target",
+        "y",
+        "class",
+        "Class",
+        "outcome",
+        "Outcome",
+    }
+)
+ENTITY_VARIANTS = frozenset(
+    {
+        "entity",
+        "Entity",
+        "entity_id",
+        "entity_id",
+        "id",
+        "ID",
+        "entityid",
+        "entityId",
+        "entity_id",
+        "customer_id",
+        "user_id",
+    }
+)
 
 
 def detect_label_column(df: "pd.DataFrame") -> Optional[str]:

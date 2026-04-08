@@ -3,12 +3,13 @@
 import torch
 from typing import Tuple, Union, List
 
+
 def size2shape(*size: Union[torch.Size, Tuple[int, ...], List[int]]) -> Tuple[int, ...]:
     """Convert size to shape.
-    
+
     Args:
         *size: Size to convert
-        
+
     Returns:
         Shape tuple
     """
@@ -20,12 +21,15 @@ def size2shape(*size: Union[torch.Size, Tuple[int, ...], List[int]]) -> Tuple[in
             return tuple(size)
     return size
 
-def broadcast_shapes(*shapes: Union[torch.Size, Tuple[int, ...], List[int]]) -> Tuple[int, ...]:
+
+def broadcast_shapes(
+    *shapes: Union[torch.Size, Tuple[int, ...], List[int]]
+) -> Tuple[int, ...]:
     """Broadcast shapes to compatible size.
-    
+
     Args:
         *shapes: Shapes to broadcast
-        
+
     Returns:
         Broadcasted shape
     """
@@ -41,4 +45,4 @@ def broadcast_shapes(*shapes: Union[torch.Size, Tuple[int, ...], List[int]]) -> 
             result.append(max(dims))
         else:
             raise ValueError(f"Shapes {shapes} cannot be broadcast together")
-    return tuple(result) 
+    return tuple(result)

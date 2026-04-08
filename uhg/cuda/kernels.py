@@ -93,38 +93,35 @@ extern "C" __global__ void attention_score_kernel(
 }
 """
 
+
 class CUDAKernels:
     """Manages CUDA kernels for UHG operations."""
-    
+
     def __init__(self):
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available")
-            
+
         # Load CUDA kernels
         self.cross_ratio = torch.cuda.compile(cross_ratio_kernel)
         self.attention_score = torch.cuda.compile(attention_score_kernel)
-        
+
     def compute_cross_ratio(
-        self,
-        p1: torch.Tensor,
-        p2: torch.Tensor,
-        p3: torch.Tensor,
-        p4: torch.Tensor
+        self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor
     ) -> torch.Tensor:
         """Compute cross-ratio using CUDA kernel."""
         assert p1.is_cuda and p2.is_cuda and p3.is_cuda and p4.is_cuda
         assert p1.dtype == torch.float32  # Currently only supports float32
-        
+
         batch_size = p1.size(0)
         dim = p1.size(1)
-        
+
         # Allocate output tensor
-        output = torch.empty(batch_size, device='cuda', dtype=torch.float32)
-        
+        output = torch.empty(batch_size, device="cuda", dtype=torch.float32)
+
         # Configure kernel launch parameters
         threads_per_block = min(batch_size, 1024)
         num_blocks = (batch_size + threads_per_block - 1) // threads_per_block
-        
+
         # Launch kernel
         self.cross_ratio(
             grid=(num_blocks, 1, 1),
@@ -136,42 +133,38 @@ class CUDAKernels:
                 p4.data_ptr(),
                 output.data_ptr(),
                 batch_size,
-                dim
-            )
+                dim,
+            ),
         )
-        
+
         return output
-        
+
     def compute_attention_scores(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
-        mask: Optional[torch.Tensor] = None
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Compute attention scores using CUDA kernel."""
         assert query.is_cuda and key.is_cuda
         assert query.dtype == torch.float32  # Currently only supports float32
-        
+
         batch_size = query.size(0)
         num_heads = query.size(1)
         seq_len = query.size(2)
         head_dim = query.size(3)
-        
+
         # Allocate output tensor
         output = torch.empty(
             (batch_size, num_heads, seq_len, seq_len),
-            device='cuda',
-            dtype=torch.float32
+            device="cuda",
+            dtype=torch.float32,
         )
-        
+
         # Configure kernel launch parameters
         block_size = min(32, seq_len)  # Use 32x32 thread blocks
-        grid_size = (
-            (seq_len + block_size - 1) // block_size,
-            num_heads,
-            batch_size
-        )
-        
+        grid_size = ((seq_len + block_size - 1) // block_size, num_heads, batch_size)
+
         # Launch kernel
         self.attention_score(
             grid=grid_size,
@@ -183,15 +176,15 @@ class CUDAKernels:
                 batch_size,
                 num_heads,
                 seq_len,
-                head_dim
-            )
+                head_dim,
+            ),
         )
-        
+
         # Apply mask if provided
         if mask is not None:
-            output = output.masked_fill(mask == 0, float('-inf'))
-            
+            output = output.masked_fill(mask == 0, float("-inf"))
+
         # Apply softmax
         output = torch.softmax(output, dim=-1)
-        
-        return output 
+
+        return output

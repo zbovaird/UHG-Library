@@ -8,4 +8,4 @@ from .base import Manifold, ScalingInfo
 from .hyperbolic import HyperbolicManifold
 from ..projective import ProjectiveUHG
 
-__all__ = ["Manifold", "ScalingInfo", "ProjectiveUHG", "HyperbolicManifold"] 
+__all__ = ["Manifold", "ScalingInfo", "ProjectiveUHG", "HyperbolicManifold"]

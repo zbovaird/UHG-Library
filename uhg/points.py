@@ -8,6 +8,7 @@ All operations strictly follow the mathematical principles outlined in UHG.pdf.
 import torch
 from typing import Optional, Tuple
 
+
 class UHGPoint:
     """
     Represents a point in Universal Hyperbolic Geometry (UHG).
@@ -23,7 +24,7 @@ class UHGPoint:
         """
         self.coords = coords
 
-    def normalize(self) -> 'UHGPoint':
+    def normalize(self) -> "UHGPoint":
         """
         Normalize the point to ensure it lies on the unit circle.
         This is crucial for maintaining hyperbolic invariants.
@@ -52,4 +53,4 @@ class UHGPoint:
         Returns:
             Tensor of shape (3,) representing the dual line.
         """
-        return self.coords 
+        return self.coords

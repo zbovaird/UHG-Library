@@ -13,4 +13,4 @@ __all__ = [
     "UHGBaseOptimizer",
     "UHGAdam",
     "UHGSGD",
-] 
+]

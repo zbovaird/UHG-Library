@@ -8,10 +8,10 @@ from .hierarchical import ProjectiveHierarchicalLayer
 from .linear import HyperbolicLinear
 
 __all__ = [
-    'UHGLayer',
-    'UHGConv',
-    'UHGAttentionLayer',
-    'ProjectiveSAGEConv',
-    'ProjectiveHierarchicalLayer',
-    'HyperbolicLinear'
+    "UHGLayer",
+    "UHGConv",
+    "UHGAttentionLayer",
+    "ProjectiveSAGEConv",
+    "ProjectiveHierarchicalLayer",
+    "HyperbolicLinear",
 ]

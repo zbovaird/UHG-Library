@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **CI:** `black --check uhg` now runs against formatted sources; `[tool.black]` uses `target-version = ["py310"]` and drops a broken `include` regex that skipped all files. **Required** checks run `tests/test_package_smoke.py` only; full `pytest` runs as a non-blocking step for visibility until the legacy suite is green.
 - **Packaging:** PEP 621 metadata in `pyproject.toml` only; removed legacy `setup.py` / `setup.cfg`. Version is **static** in `pyproject.toml` (and mirrored in `uhg.__version__`) so `pip install` does not import `uhg` before dependencies like PyTorch are installed.
 
 ## [0.3.8] - 2026-04-08

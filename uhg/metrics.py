@@ -32,15 +32,17 @@ class UHGMetric:
             a_last = a[..., -1]
             b_last = b[..., -1]
             # Case A: homogeneous-like points (last ~ 1): use 2D squared distance
-            if torch.allclose(a_last, torch.ones_like(a_last), atol=1e-6) and \
-               torch.allclose(b_last, torch.ones_like(b_last), atol=1e-6):
+            if torch.allclose(
+                a_last, torch.ones_like(a_last), atol=1e-6
+            ) and torch.allclose(b_last, torch.ones_like(b_last), atol=1e-6):
                 a2 = a[..., :2]
                 b2 = b[..., :2]
                 q = torch.sum((a2 - b2) * (a2 - b2), dim=-1)
                 return torch.clamp(q, 0.0, 1.0)
             # Case B: last ~ 0 (basis-like vectors): use Euclidean normalized dot
-            if torch.allclose(a_last, torch.zeros_like(a_last), atol=1e-6) and \
-               torch.allclose(b_last, torch.zeros_like(b_last), atol=1e-6):
+            if torch.allclose(
+                a_last, torch.zeros_like(a_last), atol=1e-6
+            ) and torch.allclose(b_last, torch.zeros_like(b_last), atol=1e-6):
                 a_e = self._euclidean_normalize(a)
                 b_e = self._euclidean_normalize(b)
                 dot = torch.sum(a_e * b_e, dim=-1)
@@ -49,7 +51,10 @@ class UHGMetric:
             # Case C: general 3D inputs: Minkowski-normalized quadrance
             a_n = self._normalize_like_hyperboloid(a)
             b_n = self._normalize_like_hyperboloid(b)
-            dot_m = torch.sum(a_n[..., :-1] * b_n[..., :-1], dim=-1) - a_n[..., -1] * b_n[..., -1]
+            dot_m = (
+                torch.sum(a_n[..., :-1] * b_n[..., :-1], dim=-1)
+                - a_n[..., -1] * b_n[..., -1]
+            )
             q_m = 1.0 - (dot_m * dot_m)
             return torch.clamp(q_m, 0.0, 1.0)
         else:
@@ -73,12 +78,17 @@ class UHGMetric:
         S = (1.0 - cos2).squeeze(-1)
         return torch.clamp(S, 0.0, 1.0)
 
-    def cross_ratio(self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor) -> torch.Tensor:
+    def cross_ratio(
+        self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor, p4: torch.Tensor
+    ) -> torch.Tensor:
         # Prefer projective 2D determinant method when non-degenerate in first two coords
         def near_zero_2d(v: torch.Tensor) -> bool:
             v2 = v[..., :2]
             return (torch.norm(v2) < self.eps).item()
-        if not (near_zero_2d(p1) or near_zero_2d(p2) or near_zero_2d(p3) or near_zero_2d(p4)):
+
+        if not (
+            near_zero_2d(p1) or near_zero_2d(p2) or near_zero_2d(p3) or near_zero_2d(p4)
+        ):
             return _cr2d(p1, p2, p3, p4)
         # Fallback: quadrance-based CR with Euclidean normalization (ensures positivity for tests)
         a = self._euclidean_normalize(p1)
@@ -102,7 +112,9 @@ class UHGMetric:
         return self.distance(a, b)
 
     # Utilities
-    def is_collinear(self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor) -> torch.Tensor:
+    def is_collinear(
+        self, p1: torch.Tensor, p2: torch.Tensor, p3: torch.Tensor
+    ) -> torch.Tensor:
         v1 = p2 - p1
         v2 = p3 - p1
         cross = torch.cross(v1, v2, dim=-1)
@@ -119,27 +131,49 @@ class UHGMetric:
         return out if out.shape[0] != 1 else out.squeeze(0)
 
     # Theorem checks (pure algebra on inputs)
-    def triple_quad_formula(self, q1: torch.Tensor, q2: torch.Tensor, q3: torch.Tensor) -> bool:
+    def triple_quad_formula(
+        self, q1: torch.Tensor, q2: torch.Tensor, q3: torch.Tensor
+    ) -> bool:
         lhs = (q1 + q2 + q3) ** 2
-        rhs = 2 * (q1 ** 2 + q2 ** 2 + q3 ** 2) + 4 * q1 * q2 * q3
+        rhs = 2 * (q1**2 + q2**2 + q3**2) + 4 * q1 * q2 * q3
         # Allow moderate tolerance to accommodate different quadrance conventions
-        return torch.isclose(lhs, rhs, rtol=1e-1, atol=1e-3).item() if isinstance(lhs, torch.Tensor) else abs(lhs - rhs) <= (1e-1 * abs(rhs) + 1e-3)
+        return (
+            torch.isclose(lhs, rhs, rtol=1e-1, atol=1e-3).item()
+            if isinstance(lhs, torch.Tensor)
+            else abs(lhs - rhs) <= (1e-1 * abs(rhs) + 1e-3)
+        )
 
-    def triple_spread_formula(self, S1: torch.Tensor, S2: torch.Tensor, S3: torch.Tensor) -> bool:
+    def triple_spread_formula(
+        self, S1: torch.Tensor, S2: torch.Tensor, S3: torch.Tensor
+    ) -> bool:
         lhs = (S1 + S2 + S3) ** 2
-        rhs = 2 * (S1 ** 2 + S2 ** 2 + S3 ** 2) + 4 * S1 * S2 * S3
+        rhs = 2 * (S1**2 + S2**2 + S3**2) + 4 * S1 * S2 * S3
         return torch.allclose(lhs, rhs, rtol=1e-5, atol=1e-5)
 
-    def cross_law(self, q1: torch.Tensor, q2: torch.Tensor, q3: torch.Tensor, S1: torch.Tensor, S2: torch.Tensor, S3: torch.Tensor) -> bool:
+    def cross_law(
+        self,
+        q1: torch.Tensor,
+        q2: torch.Tensor,
+        q3: torch.Tensor,
+        S1: torch.Tensor,
+        S2: torch.Tensor,
+        S3: torch.Tensor,
+    ) -> bool:
         # Try all cyclic pairings to account for different spread-vertex conventions
         lhs = (q1 + q2 - q3) ** 2
         rhs_candidates = [4 * q1 * q2 * (1 - S) for S in (S1, S2, S3)]
         for rhs in rhs_candidates:
-            if torch.isclose(lhs, rhs, rtol=1e-2, atol=1e-4).item() if isinstance(lhs, torch.Tensor) else abs(lhs - rhs) <= (1e-2 * abs(rhs) + 1e-4):
+            if (
+                torch.isclose(lhs, rhs, rtol=1e-2, atol=1e-4).item()
+                if isinstance(lhs, torch.Tensor)
+                else abs(lhs - rhs) <= (1e-2 * abs(rhs) + 1e-4)
+            ):
                 return True
         return False
 
-    def cross_dual_law(self, S1: torch.Tensor, S2: torch.Tensor, S3: torch.Tensor, q1: torch.Tensor) -> bool:
+    def cross_dual_law(
+        self, S1: torch.Tensor, S2: torch.Tensor, S3: torch.Tensor, q1: torch.Tensor
+    ) -> bool:
         # Try all pairings (Si,Sj;Sk) and check (Si+Sj−Sk)^2 = 4 Si Sj (1−q1)
         spreads = [S1, S2, S3]
         eps = 1e-8
@@ -152,18 +186,30 @@ class UHGMetric:
                 lhs = (Si + Sj - Sk) ** 2
                 rhs = 4 * Si * Sj * (1 - q1)
                 # Relative error check
-                rel_err = torch.abs(lhs - rhs) / (torch.abs(rhs) + eps) if isinstance(lhs, torch.Tensor) else abs(lhs - rhs) / (abs(rhs) + eps)
-                if (rel_err <= 0.25).item() if isinstance(rel_err, torch.Tensor) else rel_err <= 0.25:
+                rel_err = (
+                    torch.abs(lhs - rhs) / (torch.abs(rhs) + eps)
+                    if isinstance(lhs, torch.Tensor)
+                    else abs(lhs - rhs) / (abs(rhs) + eps)
+                )
+                if (
+                    (rel_err <= 0.25).item()
+                    if isinstance(rel_err, torch.Tensor)
+                    else rel_err <= 0.25
+                ):
                     return True
         return False
 
-    def pythagoras(self, q1: torch.Tensor, q2: torch.Tensor, q3: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def pythagoras(
+        self, q1: torch.Tensor, q2: torch.Tensor, q3: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         expected_q3 = q1 + q2 - q1 * q2
         if q3 is None:
             return expected_q3
         return torch.abs(q3 - expected_q3) < self.eps
 
-    def dual_pythagoras(self, S1: torch.Tensor, S2: torch.Tensor, S3: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def dual_pythagoras(
+        self, S1: torch.Tensor, S2: torch.Tensor, S3: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         expected_S3 = S1 + S2 - S1 * S2
         if S3 is None:
             return expected_S3
@@ -184,15 +230,23 @@ class UHGMetric:
             v = torch.cat([feats, z], dim=-1)
         # Now v is (...,3) with time-like coord positive
         # Normalize to Minkowski norm -1: divide by sqrt(|<v,v>|)
-        dot = (v[..., :-1] * v[..., :-1]).sum(dim=-1, keepdim=True) - v[..., -1:] * v[..., -1:]
+        dot = (v[..., :-1] * v[..., :-1]).sum(dim=-1, keepdim=True) - v[..., -1:] * v[
+            ..., -1:
+        ]
         # If dot >= 0 (Euclidean or null), softly push to valid region by increasing z
         needs_fix = dot >= -self.eps
         if needs_fix.any():
             feats = v[..., :-1]
             z = v[..., -1:]
-            z = torch.where(needs_fix, torch.sqrt(1.0 + (feats * feats).sum(dim=-1, keepdim=True) + self.eps), z)
+            z = torch.where(
+                needs_fix,
+                torch.sqrt(1.0 + (feats * feats).sum(dim=-1, keepdim=True) + self.eps),
+                z,
+            )
             v = torch.cat([feats, z], dim=-1)
-            dot = (v[..., :-1] * v[..., :-1]).sum(dim=-1, keepdim=True) - v[..., -1:] * v[..., -1:]
+            dot = (v[..., :-1] * v[..., :-1]).sum(dim=-1, keepdim=True) - v[
+                ..., -1:
+            ] * v[..., -1:]
         scale = torch.sqrt(torch.clamp(torch.abs(dot), min=self.eps))
         v = v / scale
         return v
@@ -208,4 +262,4 @@ class UHGMetric:
 
 def hyperbolic_distance(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     metric = UHGMetric()
-    return metric.distance(x, y) 
+    return metric.distance(x, y)

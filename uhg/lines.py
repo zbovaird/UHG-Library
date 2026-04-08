@@ -8,6 +8,7 @@ All operations strictly follow the mathematical principles outlined in UHG.pdf.
 import torch
 from typing import Optional, Tuple
 
+
 class UHGLine:
     """
     Represents a line in Universal Hyperbolic Geometry (UHG).
@@ -24,7 +25,7 @@ class UHGLine:
         self.coords = coords
 
     @classmethod
-    def from_points(cls, p1: torch.Tensor, p2: torch.Tensor) -> 'UHGLine':
+    def from_points(cls, p1: torch.Tensor, p2: torch.Tensor) -> "UHGLine":
         """
         Construct a UHG line from two points using the join operation.
         The line is the projective join of the two points.
@@ -61,4 +62,4 @@ class UHGLine:
         Returns:
             Tensor of shape (3,) representing the dual point.
         """
-        return self.coords 
+        return self.coords

@@ -74,7 +74,11 @@ def eps_grid_search(
                 ch_val = calinski_harabasz(X, labels)
             except Exception:
                 continue
-            metrics = {"davies_bouldin": db_val, "silhouette": sil_val, "calinski_harabasz": ch_val}
+            metrics = {
+                "davies_bouldin": db_val,
+                "silhouette": sil_val,
+                "calinski_harabasz": ch_val,
+            }
             if score == "db":
                 val = db_val
                 better = val < best_val
@@ -88,7 +92,11 @@ def eps_grid_search(
                 best_val = val
                 best_labels = labels
                 best_params = {"eps": eps, "min_samples": ms}
-                best = {"labels": best_labels, "params": best_params, "metrics": metrics}
+                best = {
+                    "labels": best_labels,
+                    "params": best_params,
+                    "metrics": metrics,
+                }
 
     if best is None:
         return {"labels": np.full(X.shape[0], -1), "params": {}, "metrics": None}

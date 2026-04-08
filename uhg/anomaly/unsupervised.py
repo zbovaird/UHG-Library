@@ -96,7 +96,9 @@ class UHGUnsupervisedAnomalyDetector:
             dropout=self.dropout,
         ).to(device)
         criterion = UHGAnomalyLoss(spread_weight=0.1, quad_weight=1.0, margin=1.0)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01, weight_decay=1e-5)
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=0.01, weight_decay=1e-5
+        )
         use_amp = device.type == "cuda"
         scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
@@ -106,7 +108,9 @@ class UHGUnsupervisedAnomalyDetector:
                 optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast("cuda" if use_amp else "cpu", enabled=use_amp):
                     z = self.model(X_t, edge_index)
-                    z_h = torch.cat([z, torch.ones(z.size(0), 1, device=device)], dim=-1)
+                    z_h = torch.cat(
+                        [z, torch.ones(z.size(0), 1, device=device)], dim=-1
+                    )
                     loss = criterion(z_h, edge_index, n)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -115,7 +119,9 @@ class UHGUnsupervisedAnomalyDetector:
         with torch.no_grad():
             self.model.eval()
             z = self.model(X_t, edge_index)
-            self.embeddings = torch.cat([z, torch.ones(z.size(0), 1, device=device)], dim=-1).cpu()
+            self.embeddings = torch.cat(
+                [z, torch.ones(z.size(0), 1, device=device)], dim=-1
+            ).cpu()
         self.edge_index = edge_index.cpu()
         self._X_fit = X_scaled
         self.timings = dict(timings)
@@ -260,7 +266,10 @@ class UHGUnsupervisedAnomalyDetector:
                 det.model.load_state_dict(state["model_state"], strict=True)
             if state.get("uhg_version") and state["uhg_version"] != uhg_version:
                 import warnings
-                warnings.warn(f"Loading from uhg {state['uhg_version']}, current is {uhg_version}")
+
+                warnings.warn(
+                    f"Loading from uhg {state['uhg_version']}, current is {uhg_version}"
+                )
             return det
         raise ValueError(f"Invalid export format: {type(state)}")
 
@@ -300,6 +309,7 @@ class UHGUnsupervisedAnomalyDetector:
             X_new = X_new.reshape(1, -1)
         X_new_scaled = self.scaler.transform(X_new)
         from sklearn.neighbors import NearestNeighbors
+
         nn = NearestNeighbors(n_neighbors=k)
         nn.fit(self._X_fit)
         neigh_idx = nn.kneighbors(X_new_scaled, return_distance=False)
@@ -320,9 +330,12 @@ class UHGUnsupervisedAnomalyDetector:
             scores_list.append(s[0].item())
         return torch.tensor(scores_list)
 
-    def fit_from_dataframe(self, df, feature_columns=None, **fit_kwargs) -> "UHGUnsupervisedAnomalyDetector":
+    def fit_from_dataframe(
+        self, df, feature_columns=None, **fit_kwargs
+    ) -> "UHGUnsupervisedAnomalyDetector":
         """Convenience: fit from DataFrame. Uses enforce_numeric, drops label column if present."""
         from uhg.utils.schema import detect_label_column, enforce_numeric
+
         label_col = detect_label_column(df)
         if feature_columns is None:
             feature_columns = [c for c in df.columns if c != label_col]

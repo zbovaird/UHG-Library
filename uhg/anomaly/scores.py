@@ -156,7 +156,9 @@ def boundary_score(
     return scores
 
 
-def composite_score(scores: Dict[str, torch.Tensor], weights: Dict[str, float]) -> torch.Tensor:
+def composite_score(
+    scores: Dict[str, torch.Tensor], weights: Dict[str, float]
+) -> torch.Tensor:
     """Weighted sum of named score tensors.
 
     Args:

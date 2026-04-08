@@ -4,4 +4,4 @@ This module re-exports `UHGMetric` from `uhg.metrics` to provide a single canoni
 metric class while keeping existing import paths working.
 """
 
-from .metrics import UHGMetric  # noqa: F401 
+from .metrics import UHGMetric  # noqa: F401

@@ -39,7 +39,9 @@ class EarlyStopping:
         """
         if self.best_score is None:
             self.best_score = score
-            self.best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            self.best_state = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
             return False
 
         if self.mode == "min":
@@ -49,7 +51,9 @@ class EarlyStopping:
 
         if improved:
             self.best_score = score
-            self.best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            self.best_state = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
             self.counter = 0
         else:
             self.counter += 1
