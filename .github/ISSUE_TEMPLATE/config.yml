@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/zbovaird/UHG-Library/blob/main/docs/MAP.md
+    about: Repository map and doc entry points

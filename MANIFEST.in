@@ -2,8 +2,9 @@ include LICENSE
 include README.md
 include CHANGELOG.md
 include pyproject.toml
-include setup.cfg
 include requirements.txt
+include UHG.pdf
+include UHG pictorial.pdf
 
 # Package data
 recursive-include uhg *.py
@@ -15,6 +16,7 @@ prune examples
 prune tests
 prune benchmarks
 prune use_cases
+prune scripts
 
 # Global excludes
 global-exclude *.pyc
@@ -25,10 +27,6 @@ global-exclude .ipynb_checkpoints
 global-exclude .DS_Store
 global-exclude __pycache__
 global-exclude .coverage
-global-exclude *.sh
-global-exclude Miniconda3-latest-MacOSX-arm64.sh
-global-exclude UHG.pdf
-global-exclude UHG pictorial.pdf
 global-exclude *.log
 global-exclude .pytest_cache
 global-exclude .tox

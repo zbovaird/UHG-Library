@@ -1,7 +1,7 @@
 site_name: Universal Hyperbolic Geometry Library
-site_description: A PyTorch library for Universal Hyperbolic Geometry and Hyperbolic Graph Neural Networks
-site_author: UHG Library Team
-repo_url: https://github.com/zachbovaird/UHG-Library
+site_description: UHG — projective hyperbolic geometry for ML and anomaly detection
+site_author: Zach Bovaird
+repo_url: https://github.com/zbovaird/UHG-Library
 
 theme:
   name: material
@@ -13,20 +13,18 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
-  - User Guide:
-    - Getting Started: guide/getting-started.md
-    - Core Concepts: guide/core-concepts.md
-    - Manifolds: guide/manifolds.md
-    - Graph Neural Networks: guide/graph-neural-networks.md
-  - API Reference:
-    - Core: api/core.md
-    - Manifolds: api/manifolds.md
-    - Layers: api/layers.md
-    - Optimizers: api/optimizers.md
-  - Examples:
-    - Basic Usage: examples/basic.md
-    - Graph Learning: examples/graph-learning.md
+  - Repository map: MAP.md
+  - Reference:
+      - Public API (semver): reference/public-api.md
+      - Stability & deprecation: reference/stability.md
+      - Functions summary: reference/uhg_functions_summary.md
+      - UHG reference notes: UHG_REFERENCE.md
+      - UHG principles: UHG_PRINCIPLES.md
+  - Development:
+      - MCP server (optional): development/mcp.md
+      - Implementation notes: development/IMPLEMENTATION.md
+      - Vectorization: development/VECTORIZATION.md
+  - Troubleshooting: TROUBLESHOOTING.md
   - Contributing: contributing.md
 
 markdown_extensions:
@@ -39,5 +37,4 @@ markdown_extensions:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js 
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Packaging:** PEP 621 metadata in `pyproject.toml` only; removed legacy `setup.py` / `setup.cfg` in favor of setuptools + `uhg.__version__` as the single version source for dynamic metadata.
+- **Python:** Supported interpreters aligned to **3.10+** (CI: 3.10, 3.11, 3.12).
+- **CI:** GitHub Actions runs `pytest` with coverage floor; lint job runs `black` and `mypy`.
+- **Docs:** Added `docs/MAP.md`, `docs/reference/public-api.md`, `docs/reference/stability.md`, contributor and security docs.
+
+### Removed
+
+- Duplicate `UHG/` package tree (canonical package is `uhg/` only).
+- Non-core narrative clutter from the repo root (e.g. cybersecurity/SOAR positioning docs, installer blobs); core math PDFs (`UHG.pdf`, `UHG pictorial.pdf`) remain as references.
+
 ## [0.3.7] - 2025-02-13
 ### Added
 - Unsupervised anomaly detection pipeline: `UHGUnsupervisedAnomalyDetector`
