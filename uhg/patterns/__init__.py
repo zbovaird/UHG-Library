@@ -6,4 +6,4 @@ with a focus on authorization hierarchy violation detection.
 
 from .correlation import PatternCorrelator, CorrelationPattern
 
-__all__ = ["PatternCorrelator", "CorrelationPattern"] 
+__all__ = ["PatternCorrelator", "CorrelationPattern"]

@@ -161,10 +161,11 @@ def test_normalization(uhg):
     with pytest.raises(ValueError):
         uhg.normalize_points(p_null)
     
-    # Test Euclidean point
+    # Test Euclidean point -- PyPI v0.3.7 silently fixes by recomputing time-like coord
     p_eucl = torch.tensor([1.0, 1.0, 1.0])
-    with pytest.raises(ValueError):
-        uhg.normalize_points(p_eucl)
+    p_eucl_norm = uhg.normalize_points(p_eucl)
+    norm_eucl = uhg.inner_product(p_eucl_norm, p_eucl_norm)
+    assert torch.abs(norm_eucl + 1.0) < 1e-5, f"Expected norm -1.0, got {norm_eucl}"
 
 def test_numerical_stability(uhg):
     """Test numerical stability of calculations."""

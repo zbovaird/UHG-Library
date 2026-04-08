@@ -11,14 +11,15 @@ import math
 from typing import Dict, Any, List, Optional
 from .base import UHGBaseOptimizer
 
+
 class UHGSGD(UHGBaseOptimizer):
     """
     UHG-SGD optimizer with momentum.
-    
+
     Implements stochastic gradient descent in Universal Hyperbolic Geometry (UHG) space
     with momentum support. All operations preserve the hyperbolic structure and ensure
     parameters remain on the UHG manifold.
-    
+
     Args:
         params: Parameters to optimize
         lr: Learning rate
@@ -26,18 +27,18 @@ class UHGSGD(UHGBaseOptimizer):
         weight_decay: Weight decay (L2 penalty) (default: 0)
         eps: Epsilon for numerical stability (default: 1e-8)
     """
-    
+
     def __init__(
         self,
         params: List[torch.Tensor],
         lr: float,
         momentum: float = 0.0,
         weight_decay: float = 0.0,
-        eps: float = 1e-8
+        eps: float = 1e-8,
     ):
         """
         Initialize UHG-SGD optimizer.
-        
+
         Args:
             params: Iterable of parameters to optimize
             lr: Learning rate
@@ -53,47 +54,49 @@ class UHGSGD(UHGBaseOptimizer):
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
-            
+
         defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay, eps=eps)
         super().__init__(params, defaults)
-        
-    def _compute_hyperbolic_momentum(self, grad: torch.Tensor, param: torch.Tensor, group: dict) -> torch.Tensor:
+
+    def _compute_hyperbolic_momentum(
+        self, grad: torch.Tensor, param: torch.Tensor, group: dict
+    ) -> torch.Tensor:
         """
         Compute hyperbolic momentum update.
-        
+
         Args:
             grad: Current gradient
             param: Parameter tensor
             group: Parameter group containing optimization settings
-            
+
         Returns:
             Updated momentum in tangent space
         """
         # Get current momentum from state
         state = self.state[param]
-        if 'momentum_buffer' not in state:
-            state['momentum_buffer'] = torch.zeros_like(param)
-            
+        if "momentum_buffer" not in state:
+            state["momentum_buffer"] = torch.zeros_like(param)
+
         # Update momentum using exponential moving average
-        momentum = state['momentum_buffer']
-        momentum.mul_(group['momentum']).add_(grad, alpha=1 - group['momentum'])
-        
+        momentum = state["momentum_buffer"]
+        momentum.mul_(group["momentum"]).add_(grad, alpha=1 - group["momentum"])
+
         # Project momentum to tangent space
         param_norm = torch.norm(param)
-        if param_norm < group['eps']:
+        if param_norm < group["eps"]:
             return momentum
-            
+
         param_normalized = param / param_norm
         dot_product = torch.dot(momentum, param_normalized)
         momentum = momentum - dot_product * param_normalized
-        
+
         # Normalize momentum
         momentum_norm = torch.norm(momentum)
         if momentum_norm > 0:
             momentum = momentum / momentum_norm
-            
+
         return momentum
-        
+
     def step(self, closure=None):
         """
         Perform a single optimization step.
@@ -109,7 +112,7 @@ class UHGSGD(UHGBaseOptimizer):
             loss = closure()
 
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p.grad is None:
                     continue
 
@@ -118,8 +121,8 @@ class UHGSGD(UHGBaseOptimizer):
                 param = p.data
 
                 # Apply weight decay
-                if group['weight_decay'] != 0:
-                    grad = grad.add(param, alpha=group['weight_decay'])
+                if group["weight_decay"] != 0:
+                    grad = grad.add(param, alpha=group["weight_decay"])
 
                 # Clip gradients for numerical stability
                 grad_norm = torch.norm(grad)
@@ -127,13 +130,13 @@ class UHGSGD(UHGBaseOptimizer):
                     grad = grad / grad_norm
 
                 # Compute hyperbolic momentum if enabled
-                if group['momentum'] != 0:
+                if group["momentum"] != 0:
                     momentum = self._compute_hyperbolic_momentum(grad, param, group)
                 else:
                     momentum = grad
 
                 # Update parameters using exponential map
-                lr = group['lr']
+                lr = group["lr"]
                 update = -lr * momentum
 
                 # Ensure update is in tangent space
@@ -151,4 +154,4 @@ class UHGSGD(UHGBaseOptimizer):
 
                 p.data.copy_(new_param)
 
-        return loss 
+        return loss

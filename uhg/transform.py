@@ -8,6 +8,7 @@ All operations strictly follow the mathematical principles outlined in UHG.pdf.
 import torch
 from typing import Optional, Tuple
 
+
 class UHGTransform:
     """
     Represents a transformation in Universal Hyperbolic Geometry (UHG).
@@ -45,4 +46,4 @@ class UHGTransform:
         Returns:
             Tensor of shape (3,) representing the transformed line.
         """
-        return torch.matmul(self.matrix, line) 
+        return torch.matmul(self.matrix, line)

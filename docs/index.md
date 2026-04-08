@@ -1,46 +1,19 @@
-# Universal Hyperbolic Geometry (UHG)
+# Universal Hyperbolic Geometry (UHG) Library
 
-A PyTorch library for hyperbolic deep learning using pure UHG principles.
+**PyPI package name:** `uhg` — install with `pip install uhg` or `uv pip install uhg`.
 
-## Features
+This documentation site complements the [README](https://github.com/zbovaird/UHG-Library/blob/main/README.md) and the [repository map](MAP.md).
 
-- Pure projective geometry implementation
-- No differential geometry or manifold concepts
-- Cross-ratio preservation
-- Projective transformations
-- Graph neural networks
-- Optimizers and samplers
+## Start here
 
-## Quick Start
+1. **[Repository map](MAP.md)** — Where code, examples, tests, and tooling live.
+2. **[Public API (semver)](reference/public-api.md)** — Stable symbols exported from `uhg`.
+3. **[Stability & deprecation](reference/stability.md)** — How API changes are handled.
 
-```python
-import torch
-import uhg
+## Offline references
 
-# Create points in projective space
-x = torch.randn(10, 3)
-y = torch.randn(10, 3)
+Mathematical reference PDFs are stored at the repository root ([`UHG.pdf`](https://github.com/zbovaird/UHG-Library/blob/main/UHG.pdf), [`UHG pictorial.pdf`](https://github.com/zbovaird/UHG-Library/blob/main/UHG%20pictorial.pdf)).
 
-# Initialize UHG
-uhg_proj = uhg.ProjectiveUHG()
+## Contributing
 
-# Transform points
-x_proj = uhg_proj.transform(x)
-y_proj = uhg_proj.transform(y)
-
-# Compute projective distance
-dist = uhg_proj.proj_dist(x_proj, y_proj)
-
-# Compute cross-ratio
-cr = uhg_proj.cross_ratio(x_proj[0], x_proj[1], x_proj[2], x_proj[3])
-```
-
-## Installation
-
-```bash
-pip install uhg
-```
-
-## Documentation
-
-For detailed documentation, visit [uhg.readthedocs.io](https://uhg.readthedocs.io). 
+See [contributing.md](contributing.md) and the main [CONTRIBUTING.md](https://github.com/zbovaird/UHG-Library/blob/main/CONTRIBUTING.md).

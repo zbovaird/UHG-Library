@@ -1,0 +1,38 @@
+name: Bug report
+description: Something is broken in uhg or the repository tooling
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search existing issues first.
+  - type: input
+    id: version
+    attributes:
+      label: uhg version
+      description: Output of `python -c "import uhg; print(uhg.__version__)"` or pip show uhg
+      placeholder: "0.3.7"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11.x"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Minimal code or steps, if possible.
+      render: python
+    validations:
+      required: false

@@ -56,82 +56,57 @@ def triangle_measurements(uhg, triangle_points, triangle_lines):
     
     return q1, q2, q3, S1, S2, S3
 
-def test_triple_spread_formula(uhg_large_epsilon):
-    """Test the triple spread formula with values that exactly satisfy the formula"""
-    # For the triple spread formula to be exactly satisfied, we need to find values where:
-    # (S₁ + S₂ + S₃)² = 2(S₁² + S₂² + S₃²) + 4S₁S₂S₃
-    
-    # One solution is when S₁ = S₂ = S₃ (all spreads are equal)
-    S = torch.tensor(0.5)  # Any value works when all spreads are equal
+def test_triple_spread_formula(uhg):
+    """Test the triple spread formula: (S1+S2+S3)^2 = 2(S1^2+S2^2+S3^2) + 4*S1*S2*S3.
+    For equal spreads S, the formula reduces to 9S^2 = 6S^2 + 4S^3, so S = 3/4.
+    """
+    S = torch.tensor(0.75)
     S1 = S
     S2 = S
     S3 = S
-    
-    print(f"Test spreads (equal): S1={S1}, S2={S2}, S3={S3}")
-    
-    # Calculate left and right sides of the formula
+
     lhs = (S1 + S2 + S3)**2
     rhs = 2*(S1**2 + S2**2 + S3**2) + 4*S1*S2*S3
-    
-    print(f"Triple spread formula: LHS={lhs}, RHS={rhs}, Difference={torch.abs(lhs-rhs)}")
-    
-    # Verify triple spread formula
-    assert uhg_large_epsilon.triple_spread_formula(S1, S2, S3), "Triple spread formula should hold for equal spreads"
-    
-    # Another solution is when one spread is zero
-    S1_alt = torch.tensor(0.3)
-    S2_alt = torch.tensor(0.4)
-    S3_alt = torch.tensor(0.0)  # When one spread is zero, the formula simplifies
-    
-    lhs_alt = (S1_alt + S2_alt + S3_alt)**2
-    rhs_alt = 2*(S1_alt**2 + S2_alt**2 + S3_alt**2) + 4*S1_alt*S2_alt*S3_alt
-    
-    print(f"Alt triple spread formula: LHS={lhs_alt}, RHS={rhs_alt}, Difference={torch.abs(lhs_alt-rhs_alt)}")
-    
-    # Verify with the second set of values
-    assert uhg_large_epsilon.triple_spread_formula(S1_alt, S2_alt, S3_alt), "Triple spread formula should hold when one spread is zero"
 
-def test_cross_law(uhg_very_large_epsilon):
-    """Test the cross law with values that exactly satisfy the formula"""
-    # For the cross law to be exactly satisfied, we need values where:
-    # q₁q₂q₃S₁S₂S₃ = (q₁q₂S₃ + q₂q₃S₁ + q₃q₁S₂ - q₁ - q₂ - q₃ - S₁ - S₂ - S₃ + 2)²
-    
-    # One solution is when all spreads are zero
-    q1 = torch.tensor(0.4)
-    q2 = torch.tensor(0.5)
-    q3 = torch.tensor(0.6)
+    print(f"Triple spread formula: LHS={lhs}, RHS={rhs}, Difference={torch.abs(lhs-rhs)}")
+
+    assert uhg.triple_spread_formula(S1, S2, S3), "Triple spread formula should hold for S=3/4"
+
+    z = torch.tensor(0.0)
+    assert uhg.triple_spread_formula(z, z, z), "Triple spread formula should hold for zero spreads"
+
+    S1_alt = torch.tensor(0.4)
+    S2_alt = torch.tensor(0.4)
+    S3_alt = torch.tensor(0.0)
+
+    assert uhg.triple_spread_formula(S1_alt, S2_alt, S3_alt), "Triple spread formula should hold for S1=S2, S3=0"
+
+def test_cross_law(uhg):
+    """Test the cross law: (q1 + q2 - q3)^2 = 4*q1*q2*(1 - S3).
+    The implementation only uses q1, q2, q3, and S3.
+    """
+    q1 = torch.tensor(0.25)
+    q2 = torch.tensor(0.25)
+    q3 = torch.tensor(0.0)
     S1 = torch.tensor(0.0)
     S2 = torch.tensor(0.0)
     S3 = torch.tensor(0.0)
-    
-    print(f"Test values (zero spreads): q1={q1}, q2={q2}, q3={q3}, S1={S1}, S2={S2}, S3={S3}")
-    
-    # Calculate left and right sides of the formula
-    lhs = q1*q2*q3*S1*S2*S3
-    inside_term = q1*q2*S3 + q2*q3*S1 + q3*q1*S2 - q1 - q2 - q3 - S1 - S2 - S3 + 2
-    rhs = inside_term**2
-    
+
+    lhs = (q1 + q2 - q3)**2
+    rhs = 4*q1*q2*(1 - S3)
+
     print(f"Cross law: LHS={lhs}, RHS={rhs}, Difference={torch.abs(lhs-rhs)}")
-    
-    # Verify cross law
-    assert uhg_very_large_epsilon.cross_law(q1, q2, q3, S1, S2, S3), "Cross law should hold for zero spreads"
-    
-    # Another solution is when all quadrances are zero
-    q1_alt = torch.tensor(0.0)
-    q2_alt = torch.tensor(0.0)
-    q3_alt = torch.tensor(0.0)
-    S1_alt = torch.tensor(0.3)
-    S2_alt = torch.tensor(0.4)
-    S3_alt = torch.tensor(0.5)
-    
-    lhs_alt = q1_alt*q2_alt*q3_alt*S1_alt*S2_alt*S3_alt
-    inside_term_alt = q1_alt*q2_alt*S3_alt + q2_alt*q3_alt*S1_alt + q3_alt*q1_alt*S2_alt - q1_alt - q2_alt - q3_alt - S1_alt - S2_alt - S3_alt + 2
-    rhs_alt = inside_term_alt**2
-    
-    print(f"Alt cross law: LHS={lhs_alt}, RHS={rhs_alt}, Difference={torch.abs(lhs_alt-rhs_alt)}")
-    
-    # Verify with the second set of values
-    assert uhg_very_large_epsilon.cross_law(q1_alt, q2_alt, q3_alt, S1_alt, S2_alt, S3_alt), "Cross law should hold for zero quadrances"
+
+    assert uhg.cross_law(q1, q2, q3, S1, S2, S3), "Cross law should hold"
+
+    q1b = torch.tensor(0.5)
+    q2b = torch.tensor(0.5)
+    q3b = torch.tensor(0.5)
+    S1b = torch.tensor(0.0)
+    S2b = torch.tensor(0.0)
+    S3b = torch.tensor(0.75)
+
+    assert uhg.cross_law(q1b, q2b, q3b, S1b, S2b, S3b), "Cross law should hold for second set"
 
 def test_dual_pythagoras(uhg):
     """Test dual Pythagorean theorem with specific values"""
