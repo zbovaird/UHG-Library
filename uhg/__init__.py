@@ -5,7 +5,7 @@ All operations are performed directly in hyperbolic space without tangent space 
 """
 
 # Version must be defined before imports that reference `from uhg import __version__`.
-__version__: str = "0.3.7"
+__version__: str = "0.3.8"
 
 from typing import List
 

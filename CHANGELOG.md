@@ -7,6 +7,12 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - **Packaging:** PEP 621 metadata in `pyproject.toml` only; removed legacy `setup.py` / `setup.cfg`. Version is **static** in `pyproject.toml` (and mirrored in `uhg.__version__`) so `pip install` does not import `uhg` before dependencies like PyTorch are installed.
+
+## [0.3.8] - 2026-04-08
+
+### Changed
+
+- **PyPI / install:** SPDX `license = "MIT"`; removed redundant `License ::` classifier for modern setuptools wheel builds. **NumPy** requirement widened to `>=1.19,<3` for pip resolution on Colab/PyPI. README documents **install from GitHub**, **CPU PyTorch first**, and NumPy/torch troubleshooting. `MANIFEST.in` quotes `UHG pictorial.pdf` for correct sdist inclusion.
 - **Python:** Supported interpreters aligned to **3.10+** (CI: 3.10, 3.11, 3.12).
 - **CI:** GitHub Actions runs `pytest` with coverage floor; lint job runs `black` and `mypy`.
 - **Docs:** Added `docs/MAP.md`, `docs/reference/public-api.md`, `docs/reference/stability.md`, contributor and security docs.

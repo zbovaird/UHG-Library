@@ -20,6 +20,7 @@ wheels/
 *.egg
 .env
 .venv
+.venv-ci/
 env/
 venv/
 ENV/

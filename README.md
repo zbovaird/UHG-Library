@@ -18,7 +18,7 @@ Stable imports are documented in [`docs/reference/public-api.md`](docs/reference
 
 ## Install
 
-From **PyPI** (same artifact with pip or uv):
+From **PyPI** (pip or uv):
 
 ```bash
 pip install uhg
@@ -26,6 +26,19 @@ pip install uhg
 
 ```bash
 uv pip install uhg
+```
+
+**From GitHub** (latest default branch):
+
+```bash
+pip install "git+https://github.com/zbovaird/UHG-Library.git"
+```
+
+**CPU PyTorch first (recommended when you use CPU wheels):** some environments need a compatible **PyTorch + NumPy** pair before other packages import cleanly. Install PyTorch, then `uhg`:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install uhg
 ```
 
 **From source** (contributors):
@@ -37,7 +50,9 @@ pip install -e ".[dev]"
 # or: uv pip install -e ".[dev]"
 ```
 
-Runtime dependencies include PyTorch and torch-geometric (see `pyproject.toml`). Optional extras: `uhg[mcp]` for the development MCP server.
+Runtime dependencies include PyTorch and PyTorch Geometric (see `pyproject.toml`). Optional extras: `uhg[mcp]` for the development MCP server.
+
+**Troubleshooting:** If `import uhg` fails with NumPy/torch dtype or `_ARRAY_API` errors, align versions: upgrade PyTorch, or pin NumPy (e.g. `pip install "numpy<2"`) to match your PyTorch CPU wheel.
 
 ## Quickstart (stable API)
 

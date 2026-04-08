@@ -4,7 +4,7 @@ include CHANGELOG.md
 include pyproject.toml
 include requirements.txt
 include UHG.pdf
-include UHG pictorial.pdf
+include "UHG pictorial.pdf"
 
 # Package data
 recursive-include uhg *.py
