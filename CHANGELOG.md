@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- **Packaging:** PEP 621 metadata in `pyproject.toml` only; removed legacy `setup.py` / `setup.cfg` in favor of setuptools + `uhg.__version__` as the single version source for dynamic metadata.
+- **Packaging:** PEP 621 metadata in `pyproject.toml` only; removed legacy `setup.py` / `setup.cfg`. Version is **static** in `pyproject.toml` (and mirrored in `uhg.__version__`) so `pip install` does not import `uhg` before dependencies like PyTorch are installed.
 - **Python:** Supported interpreters aligned to **3.10+** (CI: 3.10, 3.11, 3.12).
 - **CI:** GitHub Actions runs `pytest` with coverage floor; lint job runs `black` and `mypy`.
 - **Docs:** Added `docs/MAP.md`, `docs/reference/public-api.md`, `docs/reference/stability.md`, contributor and security docs.

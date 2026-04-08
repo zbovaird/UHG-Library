@@ -66,7 +66,7 @@ Pull requests should:
 
 Maintainers:
 
-1. Bump **`uhg/__version__`** (single source for dynamic metadata in `pyproject.toml`).
+1. Bump **`version`** in **`pyproject.toml`** and **`uhg/__version__`** in `uhg/__init__.py` (keep them in sync).
 2. Update **`CHANGELOG.md`** with a dated section.
 3. Tag **`vX.Y.Z`** in Git and push.
 4. Build: `python -m build`
