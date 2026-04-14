@@ -33,7 +33,7 @@ jobs:
       # Smoke tests gate merges. The legacy suite still has failures; run it as a non-blocking signal.
       - name: Run smoke tests with coverage
         run: |
-          pytest tests/test_package_smoke.py --cov=uhg --cov-report=xml --cov-report=term-missing -v
+          pytest tests/test_package_smoke.py tests/test_graphsage_training_smoke.py tests/test_cic_helpers_smoke.py tests/test_projective.py tests/test_uhg_core_calculations.py tests/test_utils_metrics_vectorized.py --cov=uhg --cov-report=xml --cov-report=term-missing -v
 
       - name: Run full test suite (informational)
         continue-on-error: true

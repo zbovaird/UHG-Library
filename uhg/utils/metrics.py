@@ -31,6 +31,11 @@ def uhg_inner_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return spatial_dot - time_product
 
 
+def minkowski_inner_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Notebook-friendly alias for the canonical UHG inner product."""
+    return uhg_inner_product(a, b)
+
+
 def uhg_norm(a: torch.Tensor) -> torch.Tensor:
     """
     Compute the hyperbolic norm of points in projective space.
@@ -42,6 +47,18 @@ def uhg_norm(a: torch.Tensor) -> torch.Tensor:
         Hyperbolic norm of shape (...)
     """
     return torch.sqrt(torch.abs(uhg_inner_product(a, a)))
+
+
+def projective_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Lift arbitrary spatial coordinates onto the upper hyperboloid sheet.
+
+    This mirrors the notebook helper that proved stable for CIC training:
+    keep the spatial coordinates and recompute the final homogeneous/time-like
+    coordinate so that ``<x, x>_M = -1``.
+    """
+    spatial = x[..., :-1]
+    z = torch.sqrt(torch.clamp(torch.sum(spatial * spatial, dim=-1, keepdim=True) + 1.0, min=eps))
+    return torch.cat([spatial, z], dim=-1)
 
 
 def uhg_quadrance(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
@@ -69,6 +86,13 @@ def uhg_quadrance(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-9) -> torch.
     return 1 - (dot_product * dot_product) / denom
 
 
+def uhg_quadrance_vectorized(
+    a: torch.Tensor, b: torch.Tensor, eps: float = 1e-9
+) -> torch.Tensor:
+    """Notebook-friendly alias for the vectorized quadrance helper."""
+    return uhg_quadrance(a, b, eps=eps)
+
+
 def uhg_spread(L: torch.Tensor, M: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
     """
     Compute UHG spread between two lines.
@@ -91,6 +115,16 @@ def uhg_spread(L: torch.Tensor, M: torch.Tensor, eps: float = 1e-9) -> torch.Ten
     denom = torch.clamp(denom_L * denom_M, min=eps)
 
     return 1 - (dot_product * dot_product) / denom
+
+
+def verify_uhg_constraints(x: torch.Tensor) -> dict[str, float]:
+    """Return constraint diagnostics for embeddings on the hyperboloid."""
+    norm_sq = minkowski_inner_product(x, x)
+    violation = torch.abs(norm_sq + 1.0)
+    return {
+        "max_violation": float(violation.max().item()),
+        "mean_violation": float(violation.mean().item()),
+    }
 
 
 def check_cross_ratio(

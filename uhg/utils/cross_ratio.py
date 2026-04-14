@@ -1,32 +1,42 @@
 """Cross-ratio computation utilities for UHG."""
 
 import torch
-from typing import Tuple, Optional
 
 
 def compute_cross_ratio(
-    a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, d: torch.Tensor
+    a: torch.Tensor,
+    b: torch.Tensor,
+    c: torch.Tensor,
+    d: torch.Tensor,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
-    """
-    Compute the cross-ratio of four points.
-    Reference: UHG.pdf, Ch. 2
+    """Compute the projective cross-ratio in a scale-invariant way.
+
+    The library notebooks operate on homogeneous 3-vectors but use only the first
+    two coordinates for the projective determinant. That determinant formula is
+    individually scale-invariant for each input point:
+
+        CR(a, b; c, d) = [a, c] [b, d] / ([a, d] [b, c])
+
+    where ``[u, v]`` is the 2x2 determinant of the first two coordinates.
     """
 
-    # Use determinants for projective cross-ratio
-    def det2(a, b):
-        return a[0] * b[1] - a[1] * b[0]
-
-    # For 3D, project to 2D by dropping last coordinate
     a_2d = a[..., :2]
     b_2d = b[..., :2]
     c_2d = c[..., :2]
     d_2d = d[..., :2]
+
+    def det2(u: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        return u[..., 0] * v[..., 1] - u[..., 1] * v[..., 0]
+
     num = det2(a_2d, c_2d) * det2(b_2d, d_2d)
     denom = det2(a_2d, d_2d) * det2(b_2d, c_2d)
-    if torch.any(denom.abs() < 1e-8):
-        print("[WARNING] cross_ratio: denominator near zero.")
-    cr = num / (denom + 1e-8)
-    return cr
+    denom = torch.where(
+        torch.abs(denom) < eps,
+        torch.full_like(denom, eps),
+        denom,
+    )
+    return num / denom
 
 
 def verify_cross_ratio_preservation(

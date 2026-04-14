@@ -2,10 +2,14 @@ import torch
 import pytest
 import numpy as np
 from uhg.utils.metrics import (
+    minkowski_inner_product,
+    projective_normalize,
     uhg_inner_product,
     uhg_norm,
     uhg_quadrance,
-    uhg_spread
+    uhg_quadrance_vectorized,
+    uhg_spread,
+    verify_uhg_constraints,
 )
 
 # Constants for testing
@@ -83,7 +87,7 @@ def test_uhg_quadrance_vectorized(batch_size, feature_dim):
     b = torch.cat([b, torch.ones(batch_size, 1, device=DEVICE)], dim=1)
     
     # Compute vectorized quadrance
-    result = uhg_quadrance(a, b)
+    result = uhg_quadrance_vectorized(a, b)
     
     # Check shape
     assert result.shape == (batch_size,), f"Expected shape ({batch_size},), got {result.shape}"
@@ -91,14 +95,14 @@ def test_uhg_quadrance_vectorized(batch_size, feature_dim):
     # Check against loop implementation for correctness
     loop_result = torch.zeros(batch_size, device=DEVICE)
     for i in range(batch_size):
-        loop_result[i] = uhg_quadrance(a[i:i+1], b[i:i+1]).squeeze()
+        loop_result[i] = uhg_quadrance_vectorized(a[i:i+1], b[i:i+1]).squeeze()
     
     assert torch.allclose(result, loop_result, rtol=1e-5, atol=1e-5), \
         f"Vectorized result doesn't match loop implementation"
     
     # Test broadcasting
     c = torch.randn(1, feature_dim + 1, device=DEVICE)  # Single vector with homogeneous coordinate
-    broadcast_result = uhg_quadrance(a, c)
+    broadcast_result = uhg_quadrance_vectorized(a, c)
     
     assert broadcast_result.shape == (batch_size,), \
         f"Expected broadcasting to shape ({batch_size},), got {broadcast_result.shape}"
@@ -159,6 +163,22 @@ def test_performance_improvement(batch_size):
     
     # Should be at least 5x faster for large batches
     assert speedup > 5, f"Expected at least 5x speedup, got {speedup:.2f}x"
+
+
+def test_projective_normalize_places_points_on_hyperboloid():
+    x = torch.tensor([[1.0, 2.0, 1.0], [-0.5, 0.25, 1.0]], device=DEVICE)
+    x_norm = projective_normalize(x)
+    norms = minkowski_inner_product(x_norm, x_norm)
+    assert torch.allclose(norms, -torch.ones_like(norms), atol=1e-5, rtol=1e-5)
+
+
+def test_verify_uhg_constraints_reports_small_violation_for_normalized_points():
+    x = torch.randn(16, 5, device=DEVICE)
+    x = torch.cat([x, torch.ones(16, 1, device=DEVICE)], dim=1)
+    x_norm = projective_normalize(x)
+    stats = verify_uhg_constraints(x_norm)
+    assert stats["max_violation"] < 1e-5
+    assert stats["mean_violation"] < 1e-6
 
 if __name__ == "__main__":
     # Run tests

@@ -21,6 +21,7 @@ nav:
       - UHG reference notes: UHG_REFERENCE.md
       - UHG principles: UHG_PRINCIPLES.md
   - Development:
+      - Colab & local venv: development/colab-local.md
       - MCP server (optional): development/mcp.md
       - Implementation notes: development/IMPLEMENTATION.md
       - Vectorization: development/VECTORIZATION.md
