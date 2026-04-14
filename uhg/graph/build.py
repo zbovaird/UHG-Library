@@ -2,12 +2,28 @@
 
 import hashlib
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.utils import coalesce as pyg_coalesce
+
+try:
+    import faiss  # type: ignore
+
+    _FAISS_AVAILABLE = True
+except ImportError:
+    _FAISS_AVAILABLE = False
+
+try:
+    from pynndescent import NNDescent  # type: ignore
+
+    _PYNNDESCENT_AVAILABLE = True
+except ImportError:
+    _PYNNDESCENT_AVAILABLE = False
+
+KnnBackend = Literal["auto", "faiss", "pynndescent", "sklearn"]
 
 
 def _to_numpy(X: Union[torch.Tensor, np.ndarray]) -> np.ndarray:
@@ -16,7 +32,90 @@ def _to_numpy(X: Union[torch.Tensor, np.ndarray]) -> np.ndarray:
         # Avoid torch->numpy bridge in environments where torch was built
         # against an incompatible NumPy ABI.
         return np.asarray(X.detach().cpu().tolist(), dtype=np.float32)
-    return np.asarray(X)
+    return np.asarray(X, dtype=np.float32)
+
+
+def _maybe_pca(
+    X: np.ndarray, pca_components: Optional[int]
+) -> tuple[np.ndarray, Optional[object]]:
+    """Reduce dimensionality for KNN search only (matches IDS v4.9 notebook)."""
+    X = np.ascontiguousarray(X, dtype=np.float32)
+    if pca_components is None or X.shape[1] <= int(pca_components):
+        return X, None
+    from sklearn.decomposition import PCA
+
+    pca = PCA(n_components=int(pca_components))
+    reduced = pca.fit_transform(X)
+    return np.ascontiguousarray(reduced.astype(np.float32)), pca
+
+
+def _knn_indices_faiss(X: np.ndarray, k: int) -> np.ndarray:
+    """kNN indices [N, k] using FAISS CPU L2 (self neighbor excluded)."""
+    if not _FAISS_AVAILABLE:
+        raise RuntimeError("faiss is not installed")
+    n, d = X.shape
+    x = np.ascontiguousarray(X, dtype=np.float32)
+    index = faiss.IndexFlatL2(d)
+    index.add(x)
+    _, indices = index.search(x, k + 1)
+    return indices[:, 1:].copy()
+
+
+def _knn_indices_pynndescent(X: np.ndarray, k: int) -> np.ndarray:
+    """Approximate kNN using PyNNDescent."""
+    if not _PYNNDESCENT_AVAILABLE:
+        raise RuntimeError("pynndescent is not installed")
+    index = NNDescent(
+        X,
+        n_neighbors=k + 1,
+        metric="euclidean",
+        n_jobs=-1,
+        verbose=False,
+    )
+    indices, _ = index.neighbor_graph
+    return np.ascontiguousarray(indices[:, 1:], dtype=np.int64)
+
+
+def _knn_indices_sklearn(X: np.ndarray, k: int, metric: str) -> np.ndarray:
+    nn = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="auto")
+    nn.fit(X)
+    return nn.kneighbors(return_distance=False)
+
+
+def _select_knn_indices(
+    X_knn: np.ndarray,
+    k: int,
+    metric: str,
+    knn_backend: KnnBackend,
+) -> tuple[np.ndarray, str]:
+    """Return neighbor indices and the backend actually used."""
+    if knn_backend == "faiss":
+        if not _FAISS_AVAILABLE:
+            raise RuntimeError("knn_backend='faiss' but faiss is not installed")
+        return _knn_indices_faiss(X_knn, k), "faiss"
+
+    if knn_backend == "pynndescent":
+        if not _PYNNDESCENT_AVAILABLE:
+            raise RuntimeError(
+                "knn_backend='pynndescent' but pynndescent is not installed"
+            )
+        return _knn_indices_pynndescent(X_knn, k), "pynndescent"
+
+    if knn_backend == "sklearn":
+        return _knn_indices_sklearn(X_knn, k, metric), "sklearn"
+
+    # auto: faiss -> pynndescent -> sklearn
+    if _FAISS_AVAILABLE:
+        try:
+            return _knn_indices_faiss(X_knn, k), "faiss"
+        except Exception:
+            pass
+    if _PYNNDESCENT_AVAILABLE:
+        try:
+            return _knn_indices_pynndescent(X_knn, k), "pynndescent"
+        except Exception:
+            pass
+    return _knn_indices_sklearn(X_knn, k, metric), "sklearn"
 
 
 def build_knn_graph(
@@ -26,21 +125,30 @@ def build_knn_graph(
     undirected: bool = False,
     cache_key: Optional[str] = None,
     cache_dir: Optional[str] = None,
+    *,
+    pca_components: Optional[int] = None,
+    knn_backend: KnnBackend = "auto",
 ) -> torch.Tensor:
     """Build k-nearest neighbors graph. Returns edge_index [2, E] in COO format.
 
-    Uses Euclidean distance by default (NearestNeighbors). By default edges are
-    directed: (i, j) means j is a k-nearest neighbor of i. Set ``undirected=True``
+    Neighbors are computed in Euclidean space. By default edges are directed:
+    ``(i, j)`` means ``j`` is a k-nearest neighbor of ``i``. Set ``undirected=True``
     to add reverse edges and merge duplicates (symmetric kNN).
+
+    For large ``N`` and high ``D``, use ``pca_components`` to run KNN on a PCA
+    projection **only for neighbor search** (node features ``X`` passed to the
+    model are unchanged). Prefer ``knn_backend='faiss'`` or ``'auto'`` (tries
+    FAISS CPU, then PyNNDescent, then scikit-learn) to reduce RAM vs pure sklearn.
 
     Args:
         X: Feature matrix [N, D].
         k: Number of neighbors per node.
-        metric: Distance metric; only "euclidean" supported for now.
+        metric: Distance metric for sklearn fallback; FAISS path uses L2.
         undirected: If True, graph is symmetrized via union of (i,j) and (j,i).
-        cache_key: If provided, save/load graph from cache. Auto-generated from
-            (X.shape, k, metric, undirected) if None and caching is used.
+        cache_key: If provided, save/load graph from cache.
         cache_dir: Directory for cache files. Default: current dir.
+        pca_components: If set and D > this value, PCA-reduce features for KNN only.
+        knn_backend: ``auto`` | ``faiss`` | ``pynndescent`` | ``sklearn``.
 
     Returns:
         edge_index: Tensor [2, E], dtype long.
@@ -52,18 +160,23 @@ def build_knn_graph(
     if k >= n:
         raise ValueError(f"k must be < n_samples ({n}), got k={k}")
 
+    X_knn, _pca = _maybe_pca(X_np, pca_components)
+
+    cache_suffix = f"{pca_components}_{knn_backend}"
     if cache_key is not None or cache_dir is not None:
-        key = cache_key or _cache_key(X_np.shape, k, metric, undirected)
+        key = cache_key or _cache_key(
+            X_np.shape, k, metric, undirected, pca_components, knn_backend
+        )
         cdir = Path(cache_dir) if cache_dir else Path(".")
         cache_path = cdir / f"{key}.edge_index.pt"
         if cache_path.exists():
             return load_edge_index(str(cache_path))
 
-    nn = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="auto")
-    nn.fit(X_np)
-    indices = nn.kneighbors(return_distance=False)
-    row = np.repeat(np.arange(n), k)
-    col = indices.ravel()
+    indices, _ = _select_knn_indices(X_knn, k, metric, knn_backend)
+    del X_knn
+
+    row = np.repeat(np.arange(n, dtype=np.int64), k)
+    col = indices.ravel().astype(np.int64)
     edge_index = torch.tensor(np.stack([row, col]), dtype=torch.long)
     if undirected:
         combined = torch.cat([edge_index, edge_index.flip(0)], dim=1)
@@ -73,7 +186,9 @@ def build_knn_graph(
         edge_index = edge_index.to(X.device)
 
     if cache_key is not None or cache_dir is not None:
-        key = cache_key or _cache_key(X_np.shape, k, metric, undirected)
+        key = cache_key or _cache_key(
+            X_np.shape, k, metric, undirected, pca_components, knn_backend
+        )
         cdir = Path(cache_dir) if cache_dir else Path(".")
         cache_path = cdir / f"{key}.edge_index.pt"
         save_edge_index(str(cache_path), edge_index.cpu())
@@ -81,8 +196,17 @@ def build_knn_graph(
     return edge_index
 
 
-def _cache_key(shape: tuple, k: int, metric: str, undirected: bool = False) -> str:
-    h = hashlib.sha256(f"{shape}_{k}_{metric}_{undirected}".encode()).hexdigest()[:16]
+def _cache_key(
+    shape: tuple,
+    k: int,
+    metric: str,
+    undirected: bool,
+    pca_components: Optional[int],
+    knn_backend: str,
+) -> str:
+    h = hashlib.sha256(
+        f"{shape}_{k}_{metric}_{undirected}_{pca_components}_{knn_backend}".encode()
+    ).hexdigest()[:16]
     return f"knn_{shape[0]}_{shape[1]}_{k}_{h}"
 
 
@@ -125,7 +249,7 @@ def build_maxk_then_slice(
     Args:
         X: Feature matrix [N, D].
         max_k: Build graph with this many neighbors.
-        k: Return only first k neighbors per node.
+        k: Return only first k neighbors per source node.
         metric: Distance metric.
 
     Returns:

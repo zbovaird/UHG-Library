@@ -25,6 +25,14 @@ def test_build_knn_graph_undirected_covers_reverse_edges():
     assert ei_und.shape[1] <= 2 * ei_dir.shape[1]
 
 
+def test_build_knn_graph_pca_sklearn_matches_dim():
+    """PCA-reduced KNN path returns valid edge_index when D > pca_components."""
+    rng = np.random.RandomState(0)
+    X = rng.randn(40, 12).astype(np.float32)
+    ei = build_knn_graph(X, k=4, knn_backend="sklearn", pca_components=5)
+    assert ei.shape == (2, 40 * 4)
+
+
 def test_build_knn_graph_basic():
     """build_knn_graph returns valid edge_index."""
     X = np.random.RandomState(42).randn(100, 5)
@@ -65,7 +73,7 @@ def test_maxk_slice_equals_fresh_small_k():
     max_k = 10
     k = 3
     sliced = build_maxk_then_slice(X, max_k=max_k, k=k)
-    fresh = build_knn_graph(X, k=k)
+    fresh = build_knn_graph(X, k=k, knn_backend="sklearn")
     assert sliced.shape == fresh.shape
     torch.testing.assert_close(sliced, fresh)
 

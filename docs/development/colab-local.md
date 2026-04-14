@@ -5,14 +5,14 @@
 For full CIC-scale runs, use **Google Colab** with a **GPU** runtime:
 
 1. Open the notebook from the repo, e.g.  
-   [colab/uhg_cic_intrusion_detection.ipynb](https://colab.research.google.com/github/zbovaird/UHG-Library/blob/main/colab/uhg_cic_intrusion_detection.ipynb)
+   [colab/uhg_cic_intrusion_detection.ipynb](https://colab.research.google.com/github/zbovaird/UHG-Library/blob/uhg-dev/colab/uhg_cic_intrusion_detection.ipynb)
 2. **Runtime → Change runtime type →** choose **T4 / L4** (or another GPU) and **Python 3**.
-3. Install the library (from PyPI or `main`):
+3. Install the library (from PyPI or `uhg-dev`):
 
    ```bash
    pip install uhg
-   # or latest main:
-   # pip install "git+https://github.com/zbovaird/UHG-Library.git"
+   # or latest uhg-dev:
+   # pip install "git+https://github.com/zbovaird/UHG-Library.git@uhg-dev"
    ```
 
 4. Mount Drive if your dataset lives there (`CIC_data.csv`).
@@ -39,10 +39,14 @@ Use this when you want to edit `uhg` and run **small** tests without Colab:
   ```
 
 - Install **torch-scatter** from the PyG index that matches your `torch` version (see above).
-- Optional: `faiss-cpu` is included in `uhg[colab]` where supported; on platforms without a wheel, skip it and rely on scikit-learn kNN in `build_knn_graph`.
+- Optional: `faiss-cpu` and `pynndescent` are included in `uhg[colab]` where supported. `uhg.graph.build.build_knn_graph(..., knn_backend="auto")` tries **FAISS CPU**, then **PyNNDescent**, then **scikit-learn**. On platforms without wheels, the sklearn fallback still works.
 
 This stack is enough for **`pytest`** and **smoke** training on **downsampled** CSV rows. Full CIC training belongs on **Colab GPU** or another machine with enough RAM/GPU.
 
 ## Environment variables (notebooks)
 
 - **`CIC_CSV`**: Path to `CIC_data.csv` (defaults in notebooks often assume `/content/drive/MyDrive/...` on Colab).
+- **`UHG_SAMPLE_FRAC`**: Fraction of rows to use after stratified subsampling (default `0.10` in `colab/uhg_cic_intrusion_detection.ipynb`).
+- **`UHG_PCA_COMPONENTS`**: If the feature dimension is larger than this value, **PCA is applied only for kNN neighbor search** (same idea as `tests/UHG_IDS_4_9.ipynb`); GNN inputs stay full-dimensional.
+- **`UHG_KNN_BACKEND`**: `auto` (default), `faiss`, `pynndescent`, or `sklearn`.
+- **`UHG_GIT_REF`**: Git ref for `pip install git+https://github.com/.../UHG-Library.git@<ref>` in Colab (default `uhg-dev`).
