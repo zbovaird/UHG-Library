@@ -1,5 +1,7 @@
 """UHG-compliant loss functions."""
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -110,3 +112,46 @@ class UHGAnomalyLoss(UHGLoss):
         margin_loss = torch.mean(F.relu(self.margin - neg_quad))
 
         return base_loss + margin_loss
+
+
+class FocalLoss(nn.Module):
+    """Focal loss for multi-class classification (good for class imbalance).
+
+    Implements the formulation from Lin et al. using per-example cross-entropy
+    and ``pt = exp(-ce)`` for the predicted class.
+
+    Args:
+        gamma: Focusing parameter (>= 0). Larger values down-weight easy examples.
+        weight: Optional class weights passed to ``cross_entropy``.
+        reduction: ``mean`` | ``sum`` | ``none``.
+        label_smoothing: Passed through to ``F.cross_entropy``.
+    """
+
+    def __init__(
+        self,
+        gamma: float = 2.0,
+        weight: Optional[torch.Tensor] = None,
+        reduction: str = "mean",
+        label_smoothing: float = 0.0,
+    ):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.reduction = reduction
+        self.label_smoothing = label_smoothing
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        ce = F.cross_entropy(
+            logits,
+            target,
+            weight=self.weight,
+            reduction="none",
+            label_smoothing=self.label_smoothing,
+        )
+        pt = torch.exp(-ce)
+        loss = ((1.0 - pt) ** self.gamma) * ce
+        if self.reduction == "mean":
+            return loss.mean()
+        if self.reduction == "sum":
+            return loss.sum()
+        return loss

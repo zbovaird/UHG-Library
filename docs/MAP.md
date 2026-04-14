@@ -19,6 +19,7 @@ Layer-1 navigation for the UHG-Library repo: what lives where and what is “pro
 | [`docs/reference/stability.md`](reference/stability.md) | Deprecation policy for public API |
 | [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Common failures |
 | [`docs/development/`](development/) | Contributor-oriented notes (implementation, vectorization) |
+| [`docs/development/colab-local.md`](development/colab-local.md) | Colab GPU + local venv / optional `uhg[colab]` |
 
 ## Examples and pedagogy (not the default install)
 

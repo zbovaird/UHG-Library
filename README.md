@@ -50,7 +50,7 @@ pip install -e ".[dev]"
 # or: uv pip install -e ".[dev]"
 ```
 
-Runtime dependencies include PyTorch and PyTorch Geometric (see `pyproject.toml`). Optional extras: `uhg[mcp]` for the development MCP server.
+Runtime dependencies include PyTorch and PyTorch Geometric (see `pyproject.toml`). Optional extras: `uhg[mcp]` (MCP server), `uhg[colab]` (PyArrow/pynndescent/FAISS for IDS-style notebooks — see [`docs/development/colab-local.md`](docs/development/colab-local.md)).
 
 **Troubleshooting:** If `import uhg` fails with NumPy/torch dtype or `_ARRAY_API` errors, align versions: upgrade PyTorch, or pin NumPy (e.g. `pip install "numpy<2"`) to match your PyTorch CPU wheel.
 

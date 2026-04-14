@@ -111,9 +111,10 @@ class ProjectiveGraphSAGE(nn.Module):
                 x_features = F.relu(x_features)
                 x = torch.cat([x_features, x[..., -1:]], dim=-1)
 
-                # Normalize to maintain projective structure
-                norm = torch.norm(x, p=2, dim=-1, keepdim=True)
-                x = x / (norm + 1e-8)
+                # Do not L2-normalize the full vector here: the last dimension is a
+                # homogeneous/Minkowski coordinate, not a spatial direction; Euclidean
+                # normalization of [spatial | homog] breaks hyperboloid geometry and
+                # can drive points near the null cone for the next ProjectiveSAGEConv.
 
                 # Apply projective dropout
                 x = self.projective_dropout(x, self.dropout)

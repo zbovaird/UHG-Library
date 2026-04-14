@@ -15,6 +15,16 @@ from uhg.graph.build import (
 )
 
 
+def test_build_knn_graph_undirected_covers_reverse_edges():
+    """Undirected mode symmetrizes; edge count is at least the directed count."""
+    rng = np.random.RandomState(42)
+    X = rng.randn(30, 4)
+    ei_dir = build_knn_graph(X, k=4, undirected=False)
+    ei_und = build_knn_graph(X, k=4, undirected=True)
+    assert ei_und.shape[1] >= ei_dir.shape[1]
+    assert ei_und.shape[1] <= 2 * ei_dir.shape[1]
+
+
 def test_build_knn_graph_basic():
     """build_knn_graph returns valid edge_index."""
     X = np.random.RandomState(42).randn(100, 5)

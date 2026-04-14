@@ -147,11 +147,13 @@ class ProjectiveSAGEConv(UHGLayer):
             transformed[..., -1] = 1.0
 
         if self.aggregator == "mean":
-            # Vectorized mean aggregation with cross-ratio weights
+            # Vectorized mean aggregation with cross-ratio weights (normalize per dst)
             x_src = x[col]  # source node features
             x_dst = x[row]  # destination node features (for weight)
             weights = self._compute_cross_ratio_weight_batch(x_dst, x_src)
-            weights = weights / (weights.sum() + 1e-8)
+            sum_w = torch.zeros(out_size, device=x.device, dtype=weights.dtype)
+            sum_w.index_add_(0, row, weights)
+            weights = weights / (sum_w[row] + 1e-8)
             weighted_messages = transformed * weights.unsqueeze(-1)
             out.index_add_(0, row, weighted_messages)
             out[..., -1] = 1.0  # Restore homogeneous coordinate
@@ -314,6 +316,10 @@ class ProjectiveSAGEConv(UHGLayer):
                 ],
                 dim=-1,
             )
+        # Bound spatial part before mapping to the upper hyperboloid sheet; large
+        # activations here explode float32 when forming t = sqrt(1 + ||s||^2) and
+        # break Minkowski inner products on the next layer.
+        spatial_sel = torch.tanh(spatial_sel)
         time_like = torch.sqrt(
             1.0 + torch.sum(spatial_sel * spatial_sel, dim=-1, keepdim=True)
         )
