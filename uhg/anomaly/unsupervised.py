@@ -48,11 +48,22 @@ class UHGUnsupervisedAnomalyDetector:
         data_fraction: float = 1.0,
         *,
         metric: str = "euclidean",
+        undirected: bool = False,
+        pca_components: Optional[int] = None,
+        knn_backend: str = "auto",
         edge_cache: Optional[str] = None,
         seed: Optional[int] = None,
         epochs: int = 50,
     ) -> "UHGUnsupervisedAnomalyDetector":
-        """Fit the detector: standardize, build graph, train GraphSAGE."""
+        """Fit the detector: standardize, build graph, train GraphSAGE.
+
+        Args:
+            undirected: If True, symmetrize the kNN graph (recommended for message passing).
+            pca_components: If set and feature dim exceeds this, run PCA on standardized
+                features **only for neighbor search** (same as IDS v4.9 notebook).
+            knn_backend: ``auto`` (FAISS CPU, then PyNNDescent, then sklearn), or a
+                specific backend: ``faiss``, ``pynndescent``, ``sklearn``.
+        """
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
@@ -80,7 +91,13 @@ class UHGUnsupervisedAnomalyDetector:
 
         with time_block("knn_build_s", timings):
             edge_index = build_knn_graph(
-                X_scaled, k, metric=metric, cache_key=edge_cache
+                X_scaled,
+                k,
+                metric=metric,
+                undirected=undirected,
+                cache_key=edge_cache,
+                pca_components=pca_components,
+                knn_backend=knn_backend,
             )
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -135,6 +152,9 @@ class UHGUnsupervisedAnomalyDetector:
             "hidden": self.hidden,
             "layers": self.layers,
             "dropout": self.dropout,
+            "undirected_knn": undirected,
+            "pca_components": pca_components,
+            "knn_backend": knn_backend,
         }
         return self
 
