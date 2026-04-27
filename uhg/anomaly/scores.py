@@ -5,7 +5,6 @@ from typing import Dict, Optional, Union
 import numpy as np
 import torch
 
-from uhg.graph.build import build_knn_graph
 from uhg.utils.metrics import uhg_quadrance
 
 
@@ -91,6 +90,8 @@ def neighbor_quadrance(
     emb = _ensure_homogeneous(emb)
     n = emb.size(0)
     if edge_index is None:
+        from uhg.graph.build import build_knn_graph
+
         edge_index = build_knn_graph(emb.cpu().numpy(), k=k)
         if emb.is_cuda:
             edge_index = edge_index.to(emb.device)
@@ -140,6 +141,8 @@ def boundary_score(
     if len(core_idx) < 2:
         return scores
     emb_core = emb[core_idx]
+    from uhg.graph.build import build_knn_graph
+
     ei = build_knn_graph(emb_core.cpu().numpy(), k=min(k, len(core_idx) - 1))
     if emb.is_cuda:
         ei = ei.to(emb.device)

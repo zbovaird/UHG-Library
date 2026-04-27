@@ -11,7 +11,7 @@ from typing import Optional, Tuple, Union
 from .metric import UHGMetric
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 class UHGLinear(nn.Module):
@@ -257,36 +257,36 @@ class UHGAttention(nn.Module):
         Returns:
             Attended features of shape (N, in_channels)
         """
-        logging.debug(f"UHGAttention.forward: input x = {x}")
+        logger.debug(f"UHGAttention.forward: input x = {x}")
         scores = self.compute_attention_scores(x)
-        logging.debug(f"UHGAttention.forward: attention scores = {scores}")
+        logger.debug(f"UHGAttention.forward: attention scores = {scores}")
         if torch.isnan(scores).any():
-            logging.error("NaNs detected in attention scores!")
+            logger.error("NaNs detected in attention scores!")
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float("-inf"))
         attention = F.softmax(scores, dim=-1)
-        logging.debug(f"UHGAttention.forward: attention weights = {attention}")
+        logger.debug(f"UHGAttention.forward: attention weights = {attention}")
         if torch.isnan(attention).any():
-            logging.error("NaNs detected in attention weights!")
+            logger.error("NaNs detected in attention weights!")
         V = torch.matmul(x, self.value.t())  # (N, heads)
-        logging.debug(f"UHGAttention.forward: V (value projection) = {V}")
+        logger.debug(f"UHGAttention.forward: V (value projection) = {V}")
         if torch.isnan(V).any():
-            logging.error("NaNs detected in value projection V!")
+            logger.error("NaNs detected in value projection V!")
         out = torch.matmul(attention, V)  # (N, heads)
-        logging.debug(f"UHGAttention.forward: out after attention*V = {out}")
+        logger.debug(f"UHGAttention.forward: out after attention*V = {out}")
         if torch.isnan(out).any():
-            logging.error("NaNs detected after attention*V!")
+            logger.error("NaNs detected after attention*V!")
         out = torch.matmul(out, self.value) / self.heads  # (N, in_channels)
-        logging.debug(f"UHGAttention.forward: out after projecting heads = {out}")
+        logger.debug(f"UHGAttention.forward: out after projecting heads = {out}")
         if torch.isnan(out).any():
-            logging.error("NaNs detected after projecting heads!")
+            logger.error("NaNs detected after projecting heads!")
             # Replace all-NaN output with canonical UHG point
             canonical = torch.zeros_like(out)
             canonical[..., 0] = 1.0
             out = torch.where(torch.isnan(out), canonical, out)
-            logging.warning("Replaced NaN output with canonical UHG point.")
+            logger.warning("Replaced NaN output with canonical UHG point.")
         out = self.project_to_uhg(out)
-        logging.debug(f"UHGAttention.forward: output after projection = {out}")
+        logger.debug(f"UHGAttention.forward: output after projection = {out}")
         return out
 
     def compute_attention_scores(self, x: torch.Tensor) -> torch.Tensor:
@@ -321,7 +321,7 @@ class UHGAttention(nn.Module):
             Projected tensor of shape (..., features)
         """
         norm = torch.norm(x, dim=-1, keepdim=True)
-        logging.debug(f"UHGAttention.project_to_uhg: input = {x}, norm = {norm}")
+        logger.debug(f"UHGAttention.project_to_uhg: input = {x}, norm = {norm}")
         # If norm is zero, replace with canonical UHG point (e.g., [1,0,0,...])
         zero_norm = (norm < 1e-8).squeeze(-1)
         if zero_norm.any():
@@ -401,7 +401,7 @@ class UHGTransformer(nn.Module):
         Returns:
             Transformed sequence of shape (seq_len, batch_size, d_model)
         """
-        logging.debug(f"UHGTransformer.forward: input shape = {src.shape}")
+        logger.debug(f"UHGTransformer.forward: input shape = {src.shape}")
 
         # Multi-head attention
         attn_output, _ = self.self_attn(
@@ -420,7 +420,7 @@ class UHGTransformer(nn.Module):
         # Project back to unit sphere
         src = src / torch.norm(src, dim=-1, keepdim=True)
 
-        logging.debug(f"UHGTransformer.forward: output shape = {src.shape}")
+        logger.debug(f"UHGTransformer.forward: output shape = {src.shape}")
         return src
 
 
@@ -479,7 +479,7 @@ class UHGMultiheadAttention(nn.Module):
         Returns:
             Tuple of (output tensor, attention weights)
         """
-        logging.debug(f"UHGMultiheadAttention.forward: query shape = {query.shape}")
+        logger.debug(f"UHGMultiheadAttention.forward: query shape = {query.shape}")
 
         # Project queries, keys, and values
         q = self.q_proj(query)  # (seq_len, batch_size, embed_dim)

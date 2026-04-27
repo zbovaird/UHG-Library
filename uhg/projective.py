@@ -38,6 +38,41 @@ class ProjectiveUHG:
     def __init__(self, epsilon: float = 1e-6):
         self.eps = epsilon
 
+    def _require_point_tensor(self, value: torch.Tensor, name: str) -> torch.Tensor:
+        """Validate a homogeneous point tensor before geometric operations."""
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(
+                f"{name} must be a torch.Tensor with shape (..., D+1); "
+                f"got {type(value).__name__}. Convert arrays with torch.as_tensor(...)."
+            )
+        if value.dim() == 0:
+            raise ValueError(f"{name} must have shape (..., D+1); got a scalar tensor")
+        if value.shape[-1] < 2:
+            raise ValueError(
+                f"{name} must have at least one spatial coordinate and one "
+                f"time-like coordinate; got shape {tuple(value.shape)}"
+            )
+        return value
+
+    def _require_compatible_points(
+        self, x: torch.Tensor, y: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self._require_point_tensor(x, "x")
+        y = self._require_point_tensor(y, "y")
+        if x.shape[-1] != y.shape[-1]:
+            raise ValueError(
+                "x and y must use the same homogeneous dimension; "
+                f"got {tuple(x.shape)} and {tuple(y.shape)}"
+            )
+        try:
+            torch.broadcast_shapes(x.shape[:-1], y.shape[:-1])
+        except RuntimeError as exc:
+            raise ValueError(
+                "x and y batch dimensions must be broadcast-compatible; "
+                f"got {tuple(x.shape)} and {tuple(y.shape)}"
+            ) from exc
+        return x, y
+
     def wedge(self, a: Tensor, b: Tensor) -> Tensor:
         """
         Compute wedge product of two vectors.
@@ -347,6 +382,10 @@ class ProjectiveUHG:
         Raises:
             ValueError: if points are null or cannot be normalized to hyperboloid
         """
+        x = self._require_point_tensor(x, "x")
+
+        input_was_vector = x.dim() == 1
+
         # Ensure points are in homogeneous coordinates
         if x.dim() == 1:
             x = x.unsqueeze(0)
@@ -372,7 +411,7 @@ class ProjectiveUHG:
         if not torch.all(torch.abs(final_norm + 1.0) < verify_tol):
             raise ValueError("Failed to normalize points to hyperboloid")
 
-        return x_norm
+        return x_norm.squeeze(0) if input_was_vector else x_norm
 
     def project(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -386,7 +425,17 @@ class ProjectiveUHG:
         Compute hyperbolic distance between points using the Minkowski inner product.
         Reference: UHG.pdf, Ch. 4
         d(x, y) = arccosh(-<x, y>), where <.,.> is the Minkowski inner product.
+
+        Args:
+            x: torch.Tensor of homogeneous coordinates with shape (..., D+1).
+            y: torch.Tensor of homogeneous coordinates with shape (..., D+1).
+                Batch dimensions must broadcast with x.
+
+        Raises:
+            TypeError: if x or y is not a torch.Tensor.
+            ValueError: if coordinate dimensions or batch dimensions are incompatible.
         """
+        x, y = self._require_compatible_points(x, y)
         x = self.normalize_points(x)
         y = self.normalize_points(y)
         spatial_dot = torch.sum(x[..., :-1] * y[..., :-1], dim=-1)

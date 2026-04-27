@@ -6,7 +6,6 @@ from typing import Literal, Optional, Union
 
 import numpy as np
 import torch
-from sklearn.neighbors import NearestNeighbors
 from torch_geometric.utils import coalesce as pyg_coalesce
 
 try:
@@ -42,11 +41,18 @@ def _maybe_pca(
     X = np.ascontiguousarray(X, dtype=np.float32)
     if pca_components is None or X.shape[1] <= int(pca_components):
         return X, None
-    from sklearn.decomposition import PCA
+    try:
+        from sklearn.decomposition import PCA
 
-    pca = PCA(n_components=int(pca_components))
-    reduced = pca.fit_transform(X)
-    return np.ascontiguousarray(reduced.astype(np.float32)), pca
+        pca = PCA(n_components=int(pca_components))
+        reduced = pca.fit_transform(X)
+        return np.ascontiguousarray(reduced.astype(np.float32)), pca
+    except Exception:
+        x_t = torch.tensor(X.tolist(), dtype=torch.float32)
+        x_centered = x_t - x_t.mean(dim=0, keepdim=True)
+        _, _, v = torch.pca_lowrank(x_centered, q=int(pca_components))
+        reduced = x_centered @ v[:, : int(pca_components)]
+        return np.ascontiguousarray(reduced.numpy().astype(np.float32)), None
 
 
 def _knn_indices_faiss(X: np.ndarray, k: int) -> np.ndarray:
@@ -77,9 +83,33 @@ def _knn_indices_pynndescent(X: np.ndarray, k: int) -> np.ndarray:
 
 
 def _knn_indices_sklearn(X: np.ndarray, k: int, metric: str) -> np.ndarray:
-    nn = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="auto")
-    nn.fit(X)
-    return nn.kneighbors(return_distance=False)
+    try:
+        from sklearn.neighbors import NearestNeighbors
+
+        nn = NearestNeighbors(n_neighbors=k, metric=metric, algorithm="auto")
+        nn.fit(X)
+        return nn.kneighbors(return_distance=False)
+    except Exception:
+        return _knn_indices_bruteforce(X, k, metric)
+
+
+def _knn_indices_bruteforce(X: np.ndarray, k: int, metric: str) -> np.ndarray:
+    """Dependency-free exact kNN fallback for small/medium arrays."""
+    x = torch.tensor(
+        np.ascontiguousarray(X, dtype=np.float32).tolist(), dtype=torch.float32
+    )
+    if metric in ("euclidean", "l2"):
+        distances = torch.cdist(x, x, p=2)
+    elif metric == "cosine":
+        x_norm = torch.nn.functional.normalize(x, p=2, dim=1)
+        distances = 1.0 - x_norm @ x_norm.t()
+    else:
+        raise RuntimeError(
+            f"metric={metric!r} requires scikit-learn; install a working "
+            "scikit-learn/SciPy stack or use metric='euclidean'/'cosine'."
+        )
+    distances.fill_diagonal_(float("inf"))
+    return torch.topk(distances, k=k, largest=False).indices.cpu().numpy()
 
 
 def _select_knn_indices(
@@ -175,9 +205,9 @@ def build_knn_graph(
     indices, _ = _select_knn_indices(X_knn, k, metric, knn_backend)
     del X_knn
 
-    row = np.repeat(np.arange(n, dtype=np.int64), k)
-    col = indices.ravel().astype(np.int64)
-    edge_index = torch.tensor(np.stack([row, col]), dtype=torch.long)
+    row = np.repeat(np.arange(n, dtype=np.int64), k).tolist()
+    col = indices.ravel().astype(np.int64).tolist()
+    edge_index = torch.tensor([row, col], dtype=torch.long)
     if undirected:
         combined = torch.cat([edge_index, edge_index.flip(0)], dim=1)
         coalesced = pyg_coalesce(combined, num_nodes=n)
@@ -262,13 +292,11 @@ def build_maxk_then_slice(
     if max_k >= n:
         raise ValueError(f"max_k must be < n_samples ({n})")
 
-    nn = NearestNeighbors(n_neighbors=max_k, metric=metric, algorithm="auto")
-    nn.fit(X_np)
-    indices = nn.kneighbors(return_distance=False)
+    indices = _knn_indices_sklearn(X_np, max_k, metric)
     indices_slice = indices[:, :k]
-    row = np.repeat(np.arange(n), k)
-    col = indices_slice.ravel()
-    edge_index = torch.tensor(np.stack([row, col]), dtype=torch.long)
+    row = np.repeat(np.arange(n, dtype=np.int64), k).tolist()
+    col = indices_slice.ravel().astype(np.int64).tolist()
+    edge_index = torch.tensor([row, col], dtype=torch.long)
     if isinstance(X, torch.Tensor) and X.is_cuda:
         edge_index = edge_index.to(X.device)
     return edge_index

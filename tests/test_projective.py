@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import pytest
 import torch
 
@@ -65,7 +66,9 @@ def test_spread_uses_pairwise_line_formula(uhg):
     s_parallel = uhg.spread(l1, l2, ref)
     s_perp = uhg.spread(l1, l3, ref)
 
-    assert torch.allclose(s_parallel, torch.zeros_like(s_parallel), atol=1e-6, rtol=1e-6)
+    assert torch.allclose(
+        s_parallel, torch.zeros_like(s_parallel), atol=1e-6, rtol=1e-6
+    )
     assert torch.allclose(s_perp, torch.ones_like(s_perp), atol=1e-6, rtol=1e-6)
 
 
@@ -97,7 +100,31 @@ def test_numerical_stability_on_small_and_large_hyperbolic_inputs(uhg):
     q_small = uhg.quadrance(a, b)
     assert torch.isfinite(q_small)
 
-    a_big = projective_normalize(torch.tensor([[1e6, 0.0, 1.0]], dtype=torch.float64))[0]
-    b_big = projective_normalize(torch.tensor([[0.0, 1e6, 1.0]], dtype=torch.float64))[0]
+    a_big = projective_normalize(torch.tensor([[1e6, 0.0, 1.0]], dtype=torch.float64))[
+        0
+    ]
+    b_big = projective_normalize(torch.tensor([[0.0, 1e6, 1.0]], dtype=torch.float64))[
+        0
+    ]
     q_big = uhg.quadrance(a_big, b_big)
     assert torch.isfinite(q_big)
+
+
+def test_distance_requires_torch_tensor_inputs(uhg):
+    a = np.array([1.0, 0.0, 2.0])
+    b = np.array([0.0, 1.0, 2.0])
+
+    with pytest.raises(TypeError, match="torch.Tensor"):
+        uhg.distance(a, b)
+
+
+def test_distance_validates_homogeneous_shape_compatibility(uhg):
+    a = torch.tensor([1.0, 0.0, 2.0])
+    wrong_dim = torch.tensor([0.0, 1.0, 0.0, 2.0])
+    with pytest.raises(ValueError, match="same homogeneous dimension"):
+        uhg.distance(a, wrong_dim)
+
+    batch = torch.ones(2, 3, 3)
+    incompatible = torch.ones(4, 3)
+    with pytest.raises(ValueError, match="broadcast-compatible"):
+        uhg.distance(batch, incompatible)

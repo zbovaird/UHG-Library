@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
-from sklearn.preprocessing import StandardScaler
 
 from uhg import __version__ as uhg_version
 from uhg.anomaly.report import aggregate_by_entity, rank_topk
@@ -16,6 +15,50 @@ from uhg.nn.early_stopping import EarlyStopping
 from uhg.nn.losses import UHGAnomalyLoss
 from uhg.nn.models.sage import ProjectiveGraphSAGE
 from uhg.utils.timing import TimingsDict, time_block
+
+
+class _NumpyStandardScaler:
+    """Minimal StandardScaler fallback when scikit-learn cannot import."""
+
+    def fit(self, X: np.ndarray) -> "_NumpyStandardScaler":
+        self.mean_ = X.mean(axis=0)
+        self.scale_ = X.std(axis=0)
+        self.scale_ = np.where(self.scale_ == 0.0, 1.0, self.scale_)
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return (X - self.mean_) / self.scale_
+
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
+        return self.fit(X).transform(X)
+
+
+def _make_standard_scaler():
+    try:
+        from sklearn.preprocessing import StandardScaler
+
+        return StandardScaler()
+    except Exception:
+        return _NumpyStandardScaler()
+
+
+def _nearest_indices(X_fit: np.ndarray, X_query: np.ndarray, k: int) -> np.ndarray:
+    try:
+        from sklearn.neighbors import NearestNeighbors
+
+        nn = NearestNeighbors(n_neighbors=k)
+        nn.fit(X_fit)
+        return nn.kneighbors(X_query, return_distance=False)
+    except Exception:
+        fit = torch.tensor(
+            np.ascontiguousarray(X_fit, dtype=np.float32).tolist(), dtype=torch.float32
+        )
+        query = torch.tensor(
+            np.ascontiguousarray(X_query, dtype=np.float32).tolist(),
+            dtype=torch.float32,
+        )
+        distances = torch.cdist(query, fit, p=2)
+        return torch.topk(distances, k=k, largest=False).indices.cpu().numpy()
 
 
 class UHGUnsupervisedAnomalyDetector:
@@ -36,7 +79,7 @@ class UHGUnsupervisedAnomalyDetector:
         self.embeddings: Optional[torch.Tensor] = None
         self.edge_index: Optional[torch.Tensor] = None
         self.timings: Dict[str, float] = {}
-        self.scaler: Optional[StandardScaler] = None
+        self.scaler: Optional[Any] = None
         self.model: Optional[ProjectiveGraphSAGE] = None
         self._cluster_result: Optional[dict] = None
         self._X_fit: Optional[np.ndarray] = None
@@ -85,9 +128,9 @@ class UHGUnsupervisedAnomalyDetector:
             n = X_np.shape[0]
 
         with time_block("data_load_s", timings):
-            self.scaler = StandardScaler()
+            self.scaler = _make_standard_scaler()
             X_scaled = self.scaler.fit_transform(X_np)
-            X_t = torch.from_numpy(X_scaled).float()
+            X_t = torch.tensor(X_scaled.tolist(), dtype=torch.float32)
 
         with time_block("knn_build_s", timings):
             edge_index = build_knn_graph(
@@ -166,7 +209,7 @@ class UHGUnsupervisedAnomalyDetector:
         """Run clustering on embeddings. Returns labels, params, metrics."""
         if self.embeddings is None:
             raise RuntimeError("Must call fit() before cluster()")
-        emb = self.embeddings.numpy()
+        emb = np.asarray(self.embeddings.tolist(), dtype=np.float64)
         if method == "dbscan":
             eps = kwargs.get("eps", 0.5)
             min_samples = kwargs.get("min_samples", 3)
@@ -233,7 +276,9 @@ class UHGUnsupervisedAnomalyDetector:
         summary["top_entities"] = top
         if entity_ids is not None:
             summary["entity_stats"] = aggregate_by_entity(
-                scores.numpy(), entity_ids, stats=("mean", "p95", "count")
+                np.asarray(scores.tolist(), dtype=np.float64),
+                entity_ids,
+                stats=("mean", "p95", "count"),
             )
         return summary
 
@@ -271,7 +316,7 @@ class UHGUnsupervisedAnomalyDetector:
             det.timings = state.get("timings", {})
             det._cluster_result = state.get("cluster_result")
             if state.get("scaler_mean") is not None:
-                det.scaler = StandardScaler()
+                det.scaler = _make_standard_scaler()
                 det.scaler.mean_ = state["scaler_mean"]
                 det.scaler.scale_ = state["scaler_scale"]
             if state.get("model_state") is not None and det.config:
@@ -328,17 +373,13 @@ class UHGUnsupervisedAnomalyDetector:
         if X_new.ndim == 1:
             X_new = X_new.reshape(1, -1)
         X_new_scaled = self.scaler.transform(X_new)
-        from sklearn.neighbors import NearestNeighbors
-
-        nn = NearestNeighbors(n_neighbors=k)
-        nn.fit(self._X_fit)
-        neigh_idx = nn.kneighbors(X_new_scaled, return_distance=False)
+        neigh_idx = _nearest_indices(self._X_fit, X_new_scaled, k)
         device = next(self.model.parameters()).device
         scores_list = []
         for i in range(X_new_scaled.shape[0]):
             idx = neigh_idx[i]
             X_sub = np.vstack([X_new_scaled[i : i + 1], self._X_fit[idx]])
-            x_t = torch.from_numpy(X_sub).float().to(device)
+            x_t = torch.tensor(X_sub.tolist(), dtype=torch.float32, device=device)
             row = torch.zeros(k, dtype=torch.long, device=device)
             col = torch.arange(1, k + 1, device=device)
             ei = torch.stack([row, col])
